@@ -1,7 +1,45 @@
+# Secrets and local configuration
 .env
-mac-worker/.venv/
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Project data and generated media
 data/*
 !data/.gitkeep
+*.srt
+*.vtt
+*.ass
+*.mp4
+*.mkv
+*.mov
+*.wav
+*.mp3
+
+# Local model caches
+models/
+.cache/
+ollama/
+.huggingface/
+
+# Python
+.venv/
+venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# JavaScript
+node_modules/
+.next/
+dist/
+build/
+
+# OS / IDE
 .DS_Store
+.idea/
+.vscode/
+
+mac-worker/.venv/
+.superpowers/

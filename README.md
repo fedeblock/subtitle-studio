@@ -69,3 +69,7 @@ Si el gateway falla en `mlx-qwen3-asr`, verifica la versión con `--help`. El CL
 1. Segmentación editorial CPS/CPL y controles de calidad, re-traducción por segmento y progreso incremental.
 2. Forma de onda y timeline interactivo, división/unión, historial de cambios y subtítulos incrustados.
 3. Sesiones MLX persistentes con temporizador de 10 minutos, monitorización de memoria y pruebas automatizadas en Apple Silicon.
+
+## Colaboración
+
+Trabajar en ramas `feature/*` o `fix/*` y revisar mediante pull requests antes de integrar en `main`. No versionar credenciales, datos ni modelos.
