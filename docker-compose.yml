@@ -1,36 +1,77 @@
 services:
   frontend:
-    image: nginx:1.27-alpine
+    build: ./frontend
     ports:
-      - "127.0.0.1:3000:80"
-    volumes:
-      - ./frontend:/usr/share/nginx/html:ro
-      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on: [api]
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
   api:
     build: ./backend
     environment: &settings
-      DATABASE_URL: postgresql+psycopg://subtitles:${DB_PASSWORD}@db:5432/subtitles
+      DATABASE_URL: postgresql+psycopg://subtitles:${DB_PASSWORD:?Ejecuta scripts/setup.sh}@db:5432/subtitles
       REDIS_URL: redis://redis:6379/0
       DATA_DIR: /data
-      MAC_URL: http://host.docker.internal:8765
-      MAC_TOKEN: ${MAC_TOKEN}
-    volumes: ["./data:/data"]
-    depends_on: [db, redis]
+      MAC_URL: ${MAC_URL:-http://host.docker.internal:${MAC_PORT:-8765}}
+      MAC_TOKEN: ${MAC_TOKEN:?Ejecuta scripts/setup.sh}
+    volumes: ["${STUDIO_DATA_DIR:-./data}:/data"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
   worker:
     build: ./backend
     command: python -m app.worker
     environment: *settings
-    volumes: ["./data:/data"]
-    depends_on: [db, redis]
+    volumes: ["${STUDIO_DATA_DIR:-./data}:/data"]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker_health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 30s
+    restart: unless-stopped
   db:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: subtitles
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Ejecuta scripts/setup.sh}
       POSTGRES_DB: subtitles
     volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U subtitles -d subtitles"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
 volumes:
   pgdata:
+  redisdata:

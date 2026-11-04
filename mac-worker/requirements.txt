@@ -1,4 +1,5 @@
 fastapi==0.115.12
 uvicorn==0.34.2
 requests==2.32.4
-mlx-qwen3-asr[aligner]
+mlx-qwen3-asr[aligner]==0.4.4
+python-dotenv==1.2.2

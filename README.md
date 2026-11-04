@@ -1,75 +1,93 @@
 # Subtitle Studio — MVP local para Apple Silicon
 
-Editor de subtítulos originales y traducidos al español con API, procesador en cola y exportación SRT/VTT. Frontend, API, Redis y PostgreSQL en Docker; inferencia MLX + Ollama ejecutada **nativamente en el Mac** para poder utilizar Metal.
+Transcripción, traducción al español, edición por segmento y exportación SRT/VTT. Frontend Nginx, API FastAPI, worker RQ, PostgreSQL y Redis ejecutan en Docker. Qwen3-ASR y su alineador ejecutan con **MLX/Metal nativo en macOS**; Ollama también es nativo.
 
-## Requisitos
+## Preparación y arranque
 
-- macOS Apple Silicon (probado conceptualmente para Mac Studio M1 Ultra / 64 GB; **no probado físicamente en ese equipo**)
-- Docker Desktop, Homebrew, Ollama, Python 3.12, FFmpeg
-- Espacio libre para los modelos y vídeos; conexión para descargarlos la primera vez
+Requisitos: macOS Apple Silicon, Docker Desktop en ejecución, Python 3.12, FFmpeg y Ollama. `setup.sh` puede instalar Python/FFmpeg con Homebrew si faltan. Se necesita espacio para vídeos y pesos; la primera descarga requiere Internet.
 
-## Instalación
+Desde este checkout:
 
 ```bash
-# En Terminal, dentro de la carpeta subtitle-studio
 bash scripts/setup.sh
+# Instala/abre Ollama desde https://ollama.com/download/mac si falta.
+# Descarga a disco el modelo configurado; esto no lo precarga en memoria:
 ollama pull qwen3:14b-q8_0
-```
 
-El instalador crea `.env` con contraseñas aleatorias e instala el gateway MLX en un entorno virtual. Instala Ollama si aún no lo tienes (https://ollama.com/download/mac) y **abre la aplicación**. Si macOS solicita permisos de red entrante para Python, autoriza solo en una red de confianza; el gateway se escucha en el puerto 8765 para que Docker pueda contactar con él.
-
-**Terminal 1:**
-
-```bash
+# Terminal 1: gateway nativo (mantener abierto)
 bash scripts/start-mac.sh
+
+# Terminal 2: infraestructura Docker
+docker compose up -d --build --wait
 ```
 
-**Terminal 2:**
+Abre [Subtitle Studio](http://localhost:3000). Sube un vídeo/audio, espera a que termine y edita/guarda cada segmento. Los proyectos fallidos permiten recuperar los originales, exportar el trabajo parcial y **Reintentar pendientes**. El reintento conserva textos, tiempos y traducciones guardadas; solo traduce las entradas vacías. No usar `rq requeue` directamente: la recuperación debe pasar por la interfaz o `POST /api/projects/{id}/retry`.
 
-```bash
-docker compose up -d --build
-docker compose logs -f worker
-```
+Para detener: `bash scripts/stop.sh` y Ctrl+C en el gateway. El script usa `docker compose stop`: conserva contenedores, base de datos, cola y medios. Ollama es independiente. Evita detener mientras se procesa un trabajo; un proceso terminado abruptamente puede requerir revisar el estado en BD/RQ antes de recuperarlo.
 
-Visita **http://localhost:3000**. Sube un vídeo o audio. Cuando termine la transcripción y traducción, podrás editar cada subtítulo y exportar `.srt`/`.vtt`.
+## Configuración
 
-Detener: `bash scripts/stop.sh` y Ctrl+C en Terminal 1.
+`setup.sh` crea `.env` con secretos aleatorios y permisos `0600` **solo si no existe**. No cambia contraseñas existentes. Si se copió `.env.example` manualmente, sustituye ambos `CHANGE_…` antes de arrancar. Usa una contraseña de BD alfanumérica/URL-safe; si contiene caracteres reservados de URL hay que codificarlos en la URL de conexión. No cambies la contraseña de un volumen PostgreSQL ya inicializado sin planificar su rotación.
 
-## Esquema de ejecución y memoria
+| Variable | Predeterminado / uso |
+| --- | --- |
+| `DB_PASSWORD` | Secreto generado; PostgreSQL y API/worker |
+| `MAC_TOKEN` | Secreto generado; autenticación `X-Worker-Token` |
+| `TRANSLATION_MODEL` | `qwen3:14b-q8_0`; preparar con `ollama pull` |
+| `ASR_MODEL` | `Qwen/Qwen3-ASR-1.7B` |
+| `ALIGNER_MODEL` | `Qwen/Qwen3-ForcedAligner-0.6B` |
+| `FRONTEND_PORT` | `3000`; publicación solo en `127.0.0.1` |
+| `MAC_PORT` | `8765`; gateway y URL usada desde Docker |
+| `MAC_URL` | Override opcional de `http://host.docker.internal:${MAC_PORT}` |
+| `STUDIO_DATA_DIR` | `./data`; misma carpeta en gateway y contenedores |
+| `OLLAMA_URL` | `http://127.0.0.1:11434`; solo lo consume el gateway nativo |
+| `MAC_BIND_HOST` | `0.0.0.0` para permitir acceso desde Docker Desktop |
 
-- **MLX**: una ejecución CLI nativa por trabajo; carga modelos al iniciar el proceso y los libera al terminar. **No conserva 10 minutos en memoria en este MVP**: requiere un servidor de sesión persistente y pruebas específicas de su API. En la primera ejecución descarga los modelos ASR y alineador a caché.
-- **Ollama**: cada petición usa `keep_alive: "10m"` para liberar su traductor tras ~10 minutos sin solicitudes. Ollama permanece como servicio nativo.
-- El worker procesa una tarea por vez. La traducción se realiza en lotes de 6 segmentos y se persiste cuando todos finalizan; se pueden recuperar los originales en la BD antes de finalizar la traducción.
+El gateway lee `.env` como datos mediante python-dotenv, sin ejecutarlo como shell. Variables exportadas en la terminal prevalecen; usa los mismos valores en ambas terminales. Un cambio en frontend/API requiere `docker compose up -d --build`.
 
-## Protección y límites
+## Modelos bajo demanda y memoria
 
-- Interfaz y API expuestas únicamente a localhost (`127.0.0.1:3000`), sin autenticación de usuarios. **No publicar en Internet ni abrir puertos con redirección** sin añadir autenticación, CSRF, cuotas y controles adicionales.
-- Gateway nativo usa token aleatorio en `X-Worker-Token`; el puerto 8765 debe quedar limitado por firewall a tu equipo. Para una instalación endurecida, se recomienda un socket Unix o túnel local, no una interfaz `0.0.0.0`.
-- El límite de carga es 2 GB; para vídeos muy grandes, implementar upload reanudable y almacenamiento incremental. No hay borrado desde UI todavía.
-- El parser conserva los segmentos del ASR. El editor permite editar texto y dos tiempos por fila, pero no incluye aún división/unión, undo/redo, waveform, diarización o control CPS automático.
-- Los subtítulos de idioma original se pueden descargar antes de una traducción completada mediante la API (`/api/projects/{id}/export?language=original`).
-- La traducción puede requerir revisión humana para preservar intención, modismos y duración de lectura.
+- Arrancar la web o el gateway no descarga ni carga pesos.
+- La primera transcripción crea `Session` y `ForcedAligner` de `mlx-qwen3-asr==0.4.4`; descarga los pesos ausentes a la caché local de Hugging Face. La agrupación de palabras en subtítulos usa el formateador de esa versión.
+- Carga, inferencia y liberación MLX ocurren en **un único hilo**. La sesión y el alineador se reutilizan. Tras **600 segundos desde el fin del último uso**, el barrido (cada segundo) elimina sus referencias, ejecuta GC y vacía la caché Metal. No interrumpe una inferencia en marcha. Los pesos siguen en disco.
+- Ollama recibe `keep_alive: "10m"` en cada generación y gestiona su descarga de memoria. Debe tener el modelo descargado previamente; no se sustituye por un servicio Docker.
+- El despliegue previsto tiene un worker RQ; el gateway serializa ASR. No activar múltiples procesos Uvicorn: duplicarían los modelos.
 
-## Depuración
+Referencias: [API de sesión MLX](https://github.com/moona3k/mlx-qwen3-asr/blob/v0.4.4/mlx_qwen3_asr/session.py), [agrupación SRT](https://github.com/moona3k/mlx-qwen3-asr/blob/v0.4.4/mlx_qwen3_asr/writers.py), [Ollama keep_alive](https://docs.ollama.com/api/generate).
+
+## Datos y límites
+
+- Vídeos/audio en `data/<UUID>/`; PostgreSQL en `pgdata`; Redis con AOF en `redisdata`. Un fallo de cola tras persistir el proyecto conserva el medio y registra un error recuperable. Cada lote traducido se guarda por separado.
+- No hay migraciones destructivas ni borrado de proyectos desde la UI. `create_all` inicializa tablas sin sustituir datos. No ejecutar `docker compose down -v`, `docker volume prune` ni borrar `data/` para resolver fallos.
+- UI/API son locales, sin autenticación de usuarios. No exponerlas a Internet. El gateway escucha en todas las interfaces por compatibilidad con Docker: protege el puerto mediante firewall/red de confianza y conserva el token en secreto. Ollama puede permanecer en loopback.
+- Límite de subida: 2 GiB; sin upload reanudable. RQ limita el trabajo a cuatro horas; cada lote de traducción tiene un timeout de 900 s. La cancelación del cliente/RQ no cancela necesariamente una inferencia nativa ya iniciada.
+- Mientras se procesa, la edición se bloquea para evitar sobrescrituras. Guardar es explícito por segmento; la UI protege selección, exportación y cierre con cambios pendientes. No hay control de versiones entre varias pestañas/usuarios.
+- No incluye diarización, waveform, división/unión, undo/redo, reglas editoriales CPS/CPL ni vídeo con subtítulos incrustados. La compatibilidad de reproducción depende de los códecs del navegador, aunque FFmpeg pueda transcribir el archivo.
+- Redis AOF `everysec` tolera reinicios normales, pero no equivale a una cola transaccional con PostgreSQL: queda una ventana entre commit y enqueue ante una caída abrupta. No hay reconciliación automática de trabajos abandonados. Conserva y revisa BD, cola y logs antes de recuperar manualmente un proyecto atascado.
+
+## Diagnóstico y pruebas
 
 ```bash
 docker compose ps
 docker compose logs -f api worker
 curl http://localhost:3000/api/health
-# diagnóstico ASR
 mac-worker/.venv/bin/mlx-qwen3-asr --doctor
-# Ollama
 curl http://127.0.0.1:11434/api/tags
+curl http://127.0.0.1:11434/api/ps
+
+# Tests sin modelos ni Docker; SQLite/archivos temporales aislados
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+bash scripts/test.sh
+
+# Integración con Docker real e inferencia simulada; requiere 13000/18765 libres
+.venv/bin/python scripts/smoke.py
 ```
 
-Si el gateway falla en `mlx-qwen3-asr`, verifica la versión con `--help`. El CLI y su soporte de SRT se basan en la documentación del repositorio [moona3k/mlx-qwen3-asr](https://github.com/moona3k/mlx-qwen3-asr). Ollama documenta `keep_alive` en https://docs.ollama.com/api/generate.
+`/api/health` comprueba BD y Redis; no carga modelos ni implica que Ollama esté disponible. `/health` del gateway requiere el token y tampoco precarga modelos. La prueba smoke crea un proyecto Compose único, verifica fallo/reintento, procesamiento, edición, exportación, rangos de medios y reinicio de BD/Redis. Detiene sus contenedores al terminar y **conserva** los volúmenes y la carpeta temporal que imprime para revisión.
 
-## Próximas mejoras
+Resultados y límites de validación: [informe del MVP](docs/MVP-VALIDATION.md).
 
-1. Segmentación editorial CPS/CPL y controles de calidad, re-traducción por segmento y progreso incremental.
-2. Forma de onda y timeline interactivo, división/unión, historial de cambios y subtítulos incrustados.
-3. Sesiones MLX persistentes con temporizador de 10 minutos, monitorización de memoria y pruebas automatizadas en Apple Silicon.
+## Colaboración y Git
 
-## Colaboración
-
-Trabajar en ramas `feature/*` o `fix/*` y revisar mediante pull requests antes de integrar en `main`. No versionar credenciales, datos ni modelos.
+`origin`: [fedeblock/subtitle-studio](https://github.com/fedeblock/subtitle-studio). Trabajar en ramas `feature/*` o `fix/*` y revisar mediante pull requests antes de integrar en `main`. El trabajo de esta revisión está en `feature/mvp-setup`. Los historiales iniciales local y remoto se integraron con un merge que conserva ambas raíces; no se reescribió ni se forzó un push. Credenciales, medios, datos, entornos virtuales y cachés de modelos están excluidos de Git.
