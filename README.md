@@ -21,7 +21,7 @@ bash scripts/start-mac.sh
 docker compose up -d --build --wait
 ```
 
-Abre [Subtitle Studio](http://localhost:3000). Sube un vídeo/audio, espera a que termine y edita/guarda cada segmento. Los proyectos fallidos permiten recuperar los originales, exportar el trabajo parcial y **Reintentar pendientes**. El reintento conserva textos, tiempos y traducciones guardadas; solo traduce las entradas vacías. No usar `rq requeue` directamente: la recuperación debe pasar por la interfaz o `POST /api/projects/{id}/retry`.
+Abre [Subtitle Studio](http://localhost:3000). Pulsa **Abrir archivo local** y selecciona el original en el diálogo nativo de macOS. El vídeo no se copia ni se envía a servicios externos. Elige una fuente: transcribir audio, un subtítulo vecino/en `Subs` o `Subtitles`, o una pista de texto incrustada en el MKV. Después elige **Traducir al español** o **Solo editar**. Importar subtítulos existentes conserva sus tiempos y evita ASR; solo editar evita también Ollama. Puedes previsualizar mientras se procesa, si el navegador admite el formato. Los proyectos fallidos permiten recuperar los originales, exportar el trabajo parcial y **Reintentar pendientes**. El reintento conserva textos, tiempos y traducciones guardadas; solo traduce las entradas vacías. No usar `rq requeue` directamente: la recuperación debe pasar por la interfaz o `POST /api/projects/{id}/retry`.
 
 Para detener: `bash scripts/stop.sh` y Ctrl+C en el gateway. El script usa `docker compose stop`: conserva contenedores, base de datos, cola y medios. Ollama es independiente. Evita detener mientras se procesa un trabajo; un proceso terminado abruptamente puede requerir revisar el estado en BD/RQ antes de recuperarlo.
 
@@ -57,12 +57,12 @@ Referencias: [API de sesión MLX](https://github.com/moona3k/mlx-qwen3-asr/blob/
 
 ## Datos y límites
 
-- Vídeos/audio en `data/<UUID>/`; PostgreSQL en `pgdata`; Redis con AOF en `redisdata`. Un fallo de cola tras persistir el proyecto conserva el medio y registra un error recuperable. Cada lote traducido se guarda por separado.
+- Los nuevos proyectos guardan solo una referencia `data/<UUID>/source.json`; el vídeo original debe permanecer accesible en su ubicación. Las copias de proyectos anteriores se conservan en `data/<UUID>/`; PostgreSQL en `pgdata`; Redis con AOF en `redisdata`. Un fallo de cola tras persistir el proyecto conserva el medio y registra un error recuperable. Cada lote traducido se guarda por separado.
 - No hay migraciones destructivas ni borrado de proyectos desde la UI. `create_all` inicializa tablas sin sustituir datos. No ejecutar `docker compose down -v`, `docker volume prune` ni borrar `data/` para resolver fallos.
 - UI/API son locales, sin autenticación de usuarios. No exponerlas a Internet. El gateway escucha en todas las interfaces por compatibilidad con Docker: protege el puerto mediante firewall/red de confianza y conserva el token en secreto. Ollama puede permanecer en loopback.
-- Límite de subida: 2 GiB; sin upload reanudable. RQ limita el trabajo a cuatro horas; cada lote de traducción tiene un timeout de 900 s. La cancelación del cliente/RQ no cancela necesariamente una inferencia nativa ya iniciada.
+- Abrir un original por referencia no tiene el límite de subida de 2 GiB. La API de subida anterior sigue disponible para compatibilidad, conserva ese límite y sí crea una copia local. RQ limita el trabajo a cuatro horas; cada lote de traducción tiene un timeout de 900 s. La cancelación del cliente/RQ no cancela necesariamente una inferencia nativa ya iniciada.
 - Mientras se procesa, la edición se bloquea para evitar sobrescrituras. Guardar es explícito por segmento; la UI protege selección, exportación y cierre con cambios pendientes. No hay control de versiones entre varias pestañas/usuarios.
-- No incluye diarización, waveform, división/unión, undo/redo, reglas editoriales CPS/CPL ni vídeo con subtítulos incrustados. La compatibilidad de reproducción depende de los códecs del navegador, aunque FFmpeg pueda transcribir el archivo.
+- No incluye diarización, waveform, división/unión, undo/redo, reglas editoriales CPS/CPL ni quemado de subtítulos en vídeo. Se importan pistas incrustadas de texto; PGS/VobSub y otras pistas de imagen necesitan OCR, aún no implementado. La compatibilidad de reproducción depende de los códecs del navegador, aunque FFmpeg pueda transcribir el archivo.
 - Redis AOF `everysec` tolera reinicios normales, pero no equivale a una cola transaccional con PostgreSQL: queda una ventana entre commit y enqueue ante una caída abrupta. No hay reconciliación automática de trabajos abandonados. Conserva y revisa BD, cola y logs antes de recuperar manualmente un proyecto atascado.
 
 ## Diagnóstico y pruebas
@@ -78,6 +78,7 @@ curl http://127.0.0.1:11434/api/ps
 # Tests sin modelos ni Docker; SQLite/archivos temporales aislados
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
+npm ci # Node.js para pruebas de frontend
 bash scripts/test.sh
 
 # Integración con Docker real e inferencia simulada; requiere 13000/18765 libres
@@ -85,6 +86,8 @@ bash scripts/test.sh
 ```
 
 `/api/health` comprueba BD y Redis; no carga modelos ni implica que Ollama esté disponible. `/health` del gateway requiere el token y tampoco precarga modelos. La prueba smoke crea un proyecto Compose único, verifica fallo/reintento, procesamiento, edición, exportación, rangos de medios y reinicio de BD/Redis. Detiene sus contenedores al terminar y **conserva** los volúmenes y la carpeta temporal que imprime para revisión.
+
+Flujo de originales y subtítulos asociados: [archivos locales](docs/LOCAL-FILES.md).
 
 Resultados y límites de validación: [informe del MVP](docs/MVP-VALIDATION.md).
 

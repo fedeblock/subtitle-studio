@@ -7,6 +7,7 @@ from redis import Redis
 from rq import Worker, Queue
 from app.core import initialize, SessionLocal, Project, Cue
 from app.subtitles import parse_srt
+from app.project_sources import reference
 
 MAC_URL = os.environ.get("MAC_URL", "http://host.docker.internal:8765")
 TOKEN = os.environ.get("MAC_TOKEN", "")
@@ -26,7 +27,12 @@ def mac_post(path, json, timeout=14400):
     r = requests.post(
         MAC_URL + path, json=json, headers={"X-Worker-Token": TOKEN}, timeout=timeout
     )
-    r.raise_for_status()
+    if not r.ok:
+        try:
+            detail = r.json().get("detail", r.reason)
+        except ValueError:
+            detail = r.reason
+        raise RuntimeError(f"Gateway {path}: {detail}")
     return r.json()
 
 
@@ -60,6 +66,9 @@ def process_project(pid):
                     )
                 db.get(Project, pid).language = result.get("language", "auto")
                 db.commit()
+        if reference(pid).get("action") == "edit":
+            set_status(pid, "ready", 100)
+            return
         set_status(pid, "translating", 55)
         with SessionLocal() as db:
             records = db.scalars(

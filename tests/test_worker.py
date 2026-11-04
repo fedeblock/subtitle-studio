@@ -111,3 +111,33 @@ def test_retry_preserves_existing_text_and_translates_only_pending(client, monke
         assert db.get(Cue, "saved").original == "Edited original"
         assert db.get(Cue, "pending").translated == "Pendiente"
         assert db.get(Project, "p").state == "ready"
+
+
+def test_asr_edit_mode_does_not_call_translation(client, monkeypatch):
+    import json
+    from pathlib import Path
+    from app.core import DATA
+
+    folder = Path(DATA) / "edit-project"
+    folder.mkdir(parents=True)
+    (folder / "source.json").write_text(json.dumps({"action": "edit"}))
+    with SessionLocal() as db:
+        db.add(
+            Project(
+                id="edit-project",
+                name="clip",
+                filename="source.json",
+                state="queued",
+                created=0,
+            )
+        )
+        db.commit()
+
+    def native(path, json, **kwargs):
+        assert path == "/transcribe"
+        return {"srt": "1\n00:00:00,000 --> 00:00:01,000\nHello\n"}
+
+    monkeypatch.setattr(worker, "mac_post", native)
+    worker.process_project("edit-project")
+    with SessionLocal() as db:
+        assert db.get(Project, "edit-project").state == "ready"

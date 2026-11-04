@@ -2,12 +2,21 @@ import uuid
 import time
 import pathlib
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request
+from fastapi.responses import (
+    FileResponse,
+    PlainTextResponse,
+    StreamingResponse,
+    Response,
+)
+from starlette.background import BackgroundTask
+from typing import Literal
+from app.native import native_request
+from app.project_sources import reference, save_workflow
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text, update
 from app.core import initialize, SessionLocal, Project, Cue, queue, DATA
-from app.subtitles import export
+from app.subtitles import export, parse_srt
 
 MAX_BYTES = 2 * 1024 * 1024 * 1024
 ALLOWED = {".mp4", ".mov", ".mkv", ".mp3", ".wav", ".m4a", ".webm", ".flac"}
@@ -24,7 +33,7 @@ app = FastAPI(title="Subtitle Studio API", lifespan=lifespan)
 
 
 def as_project(p):
-    return {
+    result = {
         k: getattr(p, k)
         for k in [
             "id",
@@ -37,6 +46,21 @@ def as_project(p):
             "created",
         ]
     }
+    info = reference(p.id) if p.filename == "source.json" else {}
+    result.update(
+        source_kind="reference" if p.filename == "source.json" else "copy",
+        subtitle_options=[
+            {
+                k: v
+                for k, v in c.items()
+                if k in ("id", "kind", "label", "supported", "reason")
+            }
+            for c in info.get("subtitles", [])
+        ],
+        source_warnings=info.get("warnings", []),
+        action=info.get("action", "translate"),
+    )
+    return result
 
 
 def as_cue(c):
@@ -130,6 +154,76 @@ async def upload(file: UploadFile = File(...)):
         await file.close()
 
 
+@app.post("/api/projects/local")
+def open_local(request: Request):
+    # A custom header prevents cross-origin pages from opening native dialogs.
+    if request.headers.get("X-Studio-Local") != "1":
+        raise HTTPException(403, "Acción local requerida")
+    pid = str(uuid.uuid4())
+    response = native_request(
+        "POST", "/files/select", json={"project_id": pid}, timeout=(5, 330)
+    )
+    if response.status_code == 204:
+        return Response(status_code=204)
+    selected = response.json()
+    with SessionLocal() as db:
+        db.add(
+            Project(
+                id=pid,
+                name=selected["name"],
+                filename="source.json",
+                state="draft",
+                created=time.time(),
+            )
+        )
+        db.commit()
+    return {"id": pid}
+
+
+class StartRequest(BaseModel):
+    source: str = Field(min_length=1, max_length=64)
+    action: Literal["translate", "edit"] = "translate"
+
+
+@app.post("/api/projects/{pid}/start")
+def start_project(pid: str, body: StartRequest):
+    with SessionLocal() as db:
+        p = db.get(Project, pid)
+        if not p:
+            raise HTTPException(404)
+        if p.state != "draft":
+            raise HTTPException(409, "El proyecto ya se ha iniciado")
+    cues = []
+    if body.source != "asr":
+        result = native_request(
+            "POST",
+            "/files/subtitle",
+            json={"project_id": pid, "subtitle_id": body.source},
+        ).json()
+        try:
+            cues = parse_srt(result["srt"])
+        except (ValueError, IndexError) as exc:
+            raise HTTPException(
+                422, "El subtítulo tiene marcas de tiempo inválidas"
+            ) from exc
+        if not cues:
+            raise HTTPException(422, "El subtítulo no contiene segmentos válidos")
+    with SessionLocal() as db:
+        p = db.scalar(select(Project).where(Project.id == pid).with_for_update())
+        if p.state != "draft":
+            raise HTTPException(409, "El proyecto ya se ha iniciado")
+        save_workflow(pid, body.source, body.action)
+        for position, cue in enumerate(cues):
+            db.add(Cue(id=str(uuid.uuid4()), project_id=pid, position=position, **cue))
+        p.state = "ready" if cues and body.action == "edit" else "queued"
+        p.progress = 100 if p.state == "ready" else 0
+        should_enqueue = p.state == "queued"
+        db.commit()
+    if should_enqueue:
+        enqueue_project(pid)
+    return {"id": pid}
+
+
 @app.get("/api/projects/{pid}")
 def get_project(pid: str):
     with SessionLocal() as db:
@@ -161,16 +255,52 @@ def retry_project(pid: str):
     return {"id": pid}
 
 
-@app.get("/api/projects/{pid}/media")
-def media(pid: str):
+@app.api_route("/api/projects/{pid}/media", methods=["GET", "HEAD"])
+def media(pid: str, request: Request):
     with SessionLocal() as db:
         p = db.get(Project, pid)
         if not p:
             raise HTTPException(404)
-        path = pathlib.Path(DATA) / pid / p.filename
-        if not path.exists():
-            raise HTTPException(404)
-        return FileResponse(path, filename=None)
+        if p.filename != "source.json":
+            path = pathlib.Path(DATA) / pid / p.filename
+            if not path.exists():
+                raise HTTPException(404)
+            return FileResponse(path, filename=None)
+    forwarded = {
+        k: request.headers[k] for k in ("Range", "If-Range") if k in request.headers
+    }
+    response = native_request(
+        request.method, f"/files/{pid}/media", headers=forwarded, stream=True
+    )
+    headers = {
+        k: v
+        for k, v in response.headers.items()
+        if k.lower()
+        in (
+            "content-type",
+            "content-length",
+            "content-range",
+            "accept-ranges",
+            "etag",
+            "last-modified",
+        )
+    }
+    if request.method == "HEAD":
+        response.close()
+        return Response(status_code=response.status_code, headers=headers)
+
+    def chunks():
+        try:
+            yield from response.iter_content(chunk_size=256 * 1024)
+        finally:
+            response.close()
+
+    return StreamingResponse(
+        chunks(),
+        status_code=response.status_code,
+        headers=headers,
+        background=BackgroundTask(response.close),
+    )
 
 
 class CueUpdate(BaseModel):

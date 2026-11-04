@@ -81,3 +81,75 @@ test("polling never replaces edits started while request was in flight", async (
   await refreshing;
   assert.equal(evaluate(c, "detail.project.state"), "ready");
 });
+
+test("preview keeps the same media element across processing updates", () => {
+  const { parseHTML } = require("linkedom");
+  const c = setup();
+  const { document } = parseHTML(
+    fs.readFileSync("frontend/index.html", "utf8"),
+  );
+  c.document = document;
+  // Restore the real renderer while retaining the API-independent harness.
+  const source = fs.readFileSync("frontend/app.js", "utf8");
+  const renderer = source.slice(
+    source.indexOf("function renderWorkspace()"),
+    source.indexOf("async function retryProject("),
+  );
+  evaluate(c, renderer);
+  evaluate(
+    c,
+    "detail={project:{id:'a',name:'movie.mp4',state:'transcribing',progress:10},cues:[]};renderWorkspace();",
+  );
+  const video = document.getElementById("video");
+  video.currentTime = 20;
+  for (const state of ["transcribing", "translating", "ready"]) {
+    evaluate(
+      c,
+      `detail.project.state=${JSON.stringify(state)};renderWorkspace();`,
+    );
+    assert.ok(
+      document.getElementById("video") === video,
+      "player node was replaced",
+    );
+    assert.equal(video.currentTime, 20);
+  }
+});
+
+test("draft source choices retain selection during unchanged polling", async () => {
+  const { parseHTML } = require("linkedom");
+  const c = setup();
+  c.document = parseHTML(
+    fs.readFileSync("frontend/index.html", "utf8"),
+  ).document;
+  const source = fs.readFileSync("frontend/app.js", "utf8");
+  evaluate(
+    c,
+    source.slice(
+      source.indexOf("function renderWorkspace()"),
+      source.indexOf("async function retryProject("),
+    ),
+  );
+  const data = {
+    project: {
+      id: "a",
+      name: "movie.mp4",
+      state: "draft",
+      progress: 0,
+      source_kind: "reference",
+      subtitle_options: [
+        { id: "srt", label: "Subs/English.srt", kind: "file", supported: true },
+        { id: "pgs", label: "PGS", kind: "embedded", supported: false },
+      ],
+    },
+    cues: [],
+  };
+  c.data = data;
+  evaluate(c, "selected='a';detail=data;renderWorkspace();");
+  const choices = c.document.getElementById("subtitle-source");
+  assert.ok(choices.textContent.includes("Subs/English.srt"));
+  assert.ok(choices.querySelector('option[value="pgs"]').hasAttribute('disabled'));
+  c.api = async (url) =>
+    url === "/api/projects" ? [] : JSON.parse(JSON.stringify(data));
+  await evaluate(c, "refresh()");
+  assert.ok(c.document.getElementById("subtitle-source") === choices);
+});

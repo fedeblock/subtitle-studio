@@ -4,10 +4,19 @@ import pathlib
 import urllib.request
 import asyncio
 import secrets
+import subprocess
 from contextlib import asynccontextmanager, suppress
 from model_runtime import ASRRuntime, MLXSession, clear_metal
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
+from uuid import UUID
+from threading import Lock
+from local_files import (
+    choose_local_file,
+    discover_subtitles,
+    read_subtitle,
+    MEDIA_EXTENSIONS,
+)
 from pydantic import BaseModel, Field
 
 ROOT = pathlib.Path(os.environ["STUDIO_DATA"]).resolve()
@@ -71,17 +80,120 @@ class TranscribeRequest(BaseModel):
     )
 
 
-@app.post("/transcribe")
-def transcribe(req: TranscribeRequest):
-    folder = (ROOT / req.project_id).resolve()
+def project_folder(pid):
+    try:
+        pid = str(UUID(str(pid)))
+    except ValueError:
+        raise HTTPException(400, "Proyecto inválido")
+    folder = (ROOT / pid).resolve()
     if folder.parent != ROOT:
         raise HTTPException(400, "Invalid project")
+    return folder
+
+
+def load_reference(folder):
+    reference = folder / "source.json"
+    if reference.is_symlink():
+        raise HTTPException(400, "Invalid reference")
+    try:
+        return json.loads(reference.read_text())
+    except (OSError, ValueError):
+        raise HTTPException(409, "Referencia local no disponible")
+
+
+def resolve_source(pid):
+    folder = project_folder(pid)
+    if (folder / "source.json").exists():
+        reference = load_reference(folder)
+        source = pathlib.Path(reference["path"])
+        if not source.is_absolute() or source.resolve() != source:
+            raise HTTPException(409, "La ruta del original ha cambiado")
+        if not source.is_file():
+            raise HTTPException(
+                410, "El archivo original se movió o ya no está disponible"
+            )
+        return source
     files = [f for f in folder.glob("source.*") if f.is_file()]
     if len(files) != 1:
         raise HTTPException(404, "Source missing")
     source = files[0].resolve()
     if source.parent != folder:
         raise HTTPException(400, "Invalid source path")
+    return source
+
+
+picker_lock = Lock()
+
+
+@app.post("/files/select")
+def select_file(req: TranscribeRequest):
+    if not picker_lock.acquire(blocking=False):
+        raise HTTPException(409, "Ya hay un selector abierto en macOS")
+    try:
+        source = choose_local_file()
+        if source is None:
+            return Response(status_code=204)
+        if not source.is_file() or source.suffix.lower() not in MEDIA_EXTENSIONS:
+            raise HTTPException(400, "Selecciona un vídeo o audio compatible")
+        folder = project_folder(req.project_id)
+        if folder.exists():
+            raise HTTPException(409, "El proyecto ya existe")
+        candidates, warnings = discover_subtitles(source)
+        folder.mkdir(parents=True)
+        with (folder / "source.json").open("x") as output:
+            json.dump(
+                {
+                    "version": 1,
+                    "path": str(source),
+                    "subtitles": candidates,
+                    "warnings": warnings,
+                },
+                output,
+                ensure_ascii=False,
+            )
+        return {"name": source.name, "filename": "source.json"}
+    except subprocess.SubprocessError as exc:
+        raise HTTPException(
+            409, "El selector de macOS no respondió; vuelve a intentarlo"
+        ) from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    finally:
+        picker_lock.release()
+
+
+@app.api_route("/files/{pid}/media", methods=["GET", "HEAD"])
+def local_media(pid: UUID):
+    return FileResponse(resolve_source(pid))
+
+
+class SubtitleRequest(TranscribeRequest):
+    subtitle_id: str = Field(max_length=64)
+
+
+@app.post("/files/subtitle")
+def import_subtitle(req: SubtitleRequest):
+    source = resolve_source(req.project_id)
+    reference = load_reference(project_folder(req.project_id))
+    candidate = next(
+        (x for x in reference.get("subtitles", []) if x["id"] == req.subtitle_id), None
+    )
+    if not candidate:
+        raise HTTPException(404, "Subtítulo no encontrado")
+    try:
+        return {"srt": read_subtitle(source, candidate)}
+    except subprocess.SubprocessError as exc:
+        raise HTTPException(
+            409,
+            "FFmpeg no pudo leer esta pista; revisa el archivo o elige otro subtítulo",
+        ) from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/transcribe")
+def transcribe(req: TranscribeRequest):
+    source = resolve_source(req.project_id)
     try:
         return app.state.asr.transcribe(source)
     except Exception as exc:

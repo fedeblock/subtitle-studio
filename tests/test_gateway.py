@@ -62,3 +62,124 @@ def test_translation_rejects_wrong_keys(gateway, monkeypatch):
         headers={"X-Worker-Token": server.TOKEN},
     )
     assert result.status_code == 502
+
+
+def test_native_selection_records_reference_without_copy(
+    gateway, monkeypatch, tmp_path
+):
+    source = tmp_path / "original.mp4"
+    source.write_bytes(b"original-video")
+    before = source.stat()
+    monkeypatch.setattr(server, "choose_local_file", lambda: source, raising=False)
+    pid = str(uuid.uuid4())
+    response = gateway.post(
+        "/files/select",
+        json={"project_id": pid},
+        headers={"X-Worker-Token": server.TOKEN},
+    )
+    assert response.status_code == 200
+    folder = server.ROOT / pid
+    assert [p.name for p in folder.iterdir()] == ["source.json"]
+    assert json.loads((folder / "source.json").read_text())["path"] == str(source)
+    assert source.read_bytes() == b"original-video"
+    assert source.stat().st_mtime_ns == before.st_mtime_ns
+    media = gateway.get(
+        f"/files/{pid}/media",
+        headers={"X-Worker-Token": server.TOKEN, "Range": "bytes=0-7"},
+    )
+    assert media.status_code == 206 and media.content == b"original"
+    assert media.headers["content-range"] == "bytes 0-7/14"
+    source.rename(tmp_path / "moved.mp4")
+    assert (
+        gateway.get(
+            f"/files/{pid}/media", headers={"X-Worker-Token": server.TOKEN}
+        ).status_code
+        == 410
+    )
+
+
+def test_native_picker_cancel_creates_no_project(gateway, monkeypatch):
+    monkeypatch.setattr(server, "choose_local_file", lambda: None, raising=False)
+    pid = str(uuid.uuid4())
+    response = gateway.post(
+        "/files/select",
+        json={"project_id": pid},
+        headers={"X-Worker-Token": server.TOKEN},
+    )
+    assert response.status_code == 204
+    assert not (server.ROOT / pid).exists()
+
+
+def test_native_reference_is_transcribed_directly(gateway, monkeypatch, tmp_path):
+    source = tmp_path / "original.wav"
+    source.write_bytes(b"audio")
+    monkeypatch.setattr(server, "choose_local_file", lambda: source, raising=False)
+    pid = str(uuid.uuid4())
+    gateway.post(
+        "/files/select",
+        json={"project_id": pid},
+        headers={"X-Worker-Token": server.TOKEN},
+    )
+    paths = []
+    monkeypatch.setattr(
+        server.app.state.asr,
+        "transcribe",
+        lambda path: paths.append(path) or {"srt": "ok"},
+    )
+    response = gateway.post(
+        "/transcribe",
+        json={"project_id": pid},
+        headers={"X-Worker-Token": server.TOKEN},
+    )
+    assert response.status_code == 200
+    assert paths == [source]
+
+
+def test_reference_rejects_redirected_parent(gateway, monkeypatch, tmp_path):
+    parent = tmp_path / "selected"
+    parent.mkdir()
+    source = parent / "movie.mp4"
+    source.write_bytes(b"selected")
+    monkeypatch.setattr(server, "choose_local_file", lambda: source)
+    pid = str(uuid.uuid4())
+    headers = {"X-Worker-Token": server.TOKEN}
+    assert (
+        gateway.post(
+            "/files/select", json={"project_id": pid}, headers=headers
+        ).status_code
+        == 200
+    )
+    parent.rename(tmp_path / "original")
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "movie.mp4").write_bytes(b"unselected")
+    parent.symlink_to(other)
+    assert gateway.get(f"/files/{pid}/media", headers=headers).status_code == 409
+
+
+def test_subtitle_conversion_failure_has_actionable_error(
+    gateway, monkeypatch, tmp_path
+):
+    import subprocess
+
+    source = tmp_path / "movie.mkv"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(server, "choose_local_file", lambda: source)
+    monkeypatch.setattr(
+        server, "discover_subtitles", lambda _: ([{"id": "sub", "supported": True}], [])
+    )
+    pid = str(uuid.uuid4())
+    headers = {"X-Worker-Token": server.TOKEN}
+    gateway.post("/files/select", json={"project_id": pid}, headers=headers)
+
+    def fail(*args):
+        raise subprocess.CalledProcessError(1, ["ffmpeg"])
+
+    monkeypatch.setattr(server, "read_subtitle", fail)
+    response = gateway.post(
+        "/files/subtitle",
+        json={"project_id": pid, "subtitle_id": "sub"},
+        headers=headers,
+    )
+    assert response.status_code == 409
+    assert "FFmpeg" in response.json()["detail"]
