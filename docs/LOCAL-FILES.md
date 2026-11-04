@@ -43,3 +43,11 @@ La previsualización transmite bytes dentro del propio equipo (navegador → API
 
 - Tras el segundo ajuste, el proyecto de la película que referencia el original se reanudó y superó los 192 segmentos traducidos. Continúa en segundo plano; no se ha comprobado aún el final completo de la traducción. La antigua copia del proyecto `ff12559a-d294-4564-81b2-ff1d83101699` no estaba disponible al reintentarlo; se usó el proyecto más reciente `913ed2a0-70df-43d0-b952-eeb91f71e65f`, con textos y tiempos idénticos y original accesible.
 - Verificación final: 40 pruebas Python y 13 Node; imágenes Docker construidas, servicios activos y prueba de autoguardado/deshacer en navegador sobre proyecto sintético. Revisión adicional de las carreras de guardado y protección de conflictos entre pestañas.
+
+## Error de sentencias preparadas en mejoras sucesivas
+
+El 2026-11-04 la mejora del proyecto de la película falló con `DuplicatePreparedStatement: _pg3_0`; la reversión recuperó el texto y el proyecto quedó listo. La traducción ya había terminado. La causa se reprodujo con PostgreSQL real y consultas `SELECT`: RQ crea un proceso hijo por trabajo y ambos heredaban una conexión ya abierta en el proceso principal. Tras varias transacciones confirmadas, el segundo hijo intentaba preparar un nombre que seguía existiendo en la sesión compartida.
+
+`ForkSafeWorker` reemplaza el pool del hijo con `engine.dispose(close=False)` antes de que RQ ejecute cada trabajo, sin cerrar las conexiones del padre. Cobertura: prueba unitaria del orden; `scripts/test-fork-postgres.py` ejecuta dos hijos consecutivos con PostgreSQL real y valida que cada proceso tenga una conexión diferente; dos mejoras y reversiones reales con Ollama y RQ sobre un proyecto sintético, sin modificar la película. Suite completa: 41 pruebas Python y 13 Node. Se conserva el proyecto de prueba `fdfc4b94-cc1c-4317-93f7-471b227d01b0`.
+
+Referencias técnicas: [SQLAlchemy: conexiones y procesos bifurcados](https://docs.sqlalchemy.org/en/21/core/connections.html#engine-disposal) y [Psycopg: concurrencia y procesos](https://www.psycopg.org/psycopg3/docs/advanced/async.html#concurrent-operations).

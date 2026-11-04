@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy import select, update
 from redis import Redis
 from rq import Worker, Queue
-from app.core import initialize, SessionLocal, Project, Cue
+from app.core import initialize, SessionLocal, Project, Cue, engine
 from app.subtitles import parse_srt
 from app.project_sources import reference
 from app import improvement
@@ -169,10 +169,17 @@ def improve_project(pid, backup_id):
         raise
 
 
+class ForkSafeWorker(Worker):
+    def main_work_horse(self, job, queue):
+        # RQ forks once per job; never use the parent's pooled PostgreSQL sockets.
+        engine.dispose(close=False)
+        return super().main_work_horse(job, queue)
+
+
 if __name__ == "__main__":
     initialize()
     redis = Redis.from_url(os.environ["REDIS_URL"])
-    Worker(
+    ForkSafeWorker(
         [Queue("subtitles", connection=redis)],
         connection=redis,
         name=socket.gethostname(),

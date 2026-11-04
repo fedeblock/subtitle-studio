@@ -286,3 +286,18 @@ def test_undo_partial_improvement_restores_previous_status(client, monkeypatch):
         and project["error"] == ""
         and project["progress"] == 100
     )
+
+
+def test_rq_child_replaces_parent_pool_before_running_job(monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        worker.engine, "dispose", lambda **kw: events.append(("dispose", kw))
+    )
+    monkeypatch.setattr(
+        worker.Worker,
+        "main_work_horse",
+        lambda self, job, queue: events.append(("job", job, queue)),
+    )
+    instance = object.__new__(worker.ForkSafeWorker)
+    instance.main_work_horse("job", "queue")
+    assert events == [("dispose", {"close": False}), ("job", "job", "queue")]
