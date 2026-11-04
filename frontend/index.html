@@ -125,6 +125,18 @@
       }
       .subtitle-preview ol {
         margin-bottom: 0;
+        max-height: 45vh;
+        overflow: auto;
+      }
+      .preview-segment {
+        display: block;
+        width: 100%;
+        padding: 5px 8px;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        text-align: left;
+        white-space: pre-wrap;
       }
       .library-actions {
         display: flex;
@@ -166,6 +178,25 @@
       }
       .work {
         padding: 20px;
+      }
+      .player-frame {
+        position: relative;
+      }
+      .video-subtitles {
+        position: absolute;
+        left: 8%;
+        right: 8%;
+        bottom: 16%;
+        text-align: center;
+        color: #fff;
+        font-size: clamp(16px, 2vw, 26px);
+        font-weight: 650;
+        line-height: 1.35;
+        text-shadow:
+          0 1px 3px #000,
+          0 0 6px #000;
+        white-space: pre-wrap;
+        pointer-events: none;
       }
       .player {
         width: 100%;

@@ -266,7 +266,7 @@ def open_local(request: Request):
 
 class StartRequest(BaseModel):
     source: str = Field(min_length=1, max_length=64)
-    action: Literal["translate", "edit"] = "translate"
+    action: Literal["translate", "edit", "view"] = "translate"
     audio_index: int | None = Field(default=None, ge=0)
 
 
@@ -290,16 +290,7 @@ def subtitle_preview(pid: str, subtitle_id: str = Query(min_length=1, max_length
         raise HTTPException(
             422, "El subtítulo tiene marcas de tiempo inválidas"
         ) from exc
-    return {
-        "cues": [
-            {
-                "start": cue["start"],
-                "end": cue["end"],
-                "original": cue["original"][:500],
-            }
-            for cue in cues[:8]
-        ]
-    }
+    return {"cues": cues}
 
 
 @app.get("/api/projects/{pid}/audio-preview")
@@ -366,12 +357,30 @@ def start_project(pid: str, body: StartRequest):
         save_workflow(pid, body.source, body.action, body.audio_index)
         for position, cue in enumerate(cues):
             db.add(Cue(id=str(uuid.uuid4()), project_id=pid, position=position, **cue))
-        p.state = "ready" if cues and body.action == "edit" else "queued"
+        p.state = "ready" if cues and body.action in ("edit", "view") else "queued"
         p.progress = 100 if p.state == "ready" else 0
         should_enqueue = p.state == "queued"
         db.commit()
     if should_enqueue:
         enqueue_project(pid)
+    return {"id": pid}
+
+
+@app.post("/api/projects/{pid}/edit-mode")
+def edit_mode(pid: str):
+    with SessionLocal() as db:
+        p = db.scalar(select(Project).where(Project.id == pid).with_for_update())
+        if not p:
+            raise HTTPException(404)
+        require_visible(db, pid)
+        if p.state not in ("ready", "failed") or p.filename != "source.json":
+            raise HTTPException(409, "No se puede editar este proyecto ahora")
+        info = reference(pid)
+        if info.get("action") != "view":
+            raise HTTPException(409, "El proyecto no está en modo de vista")
+        save_workflow(
+            pid, info.get("selected_source", "asr"), "edit", info.get("audio_index")
+        )
     return {"id": pid}
 
 

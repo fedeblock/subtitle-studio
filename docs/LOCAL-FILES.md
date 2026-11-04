@@ -21,7 +21,7 @@ Tras abrir un original, el proyecto queda en borrador hasta elegir una fuente y 
 - Archivos SRT/VTT/ASS/SSA en la misma carpeta, `Subs` o `Subtitles` (sin distinguir mayúsculas), incluyendo un nivel de subcarpetas. Máximo 200 candidatos externos, 20 MiB por subtítulo; no se siguen enlaces simbólicos.
 - Pistas incrustadas de texto detectadas con FFprobe. FFmpeg extrae únicamente el texto a memoria; no remultiplexa ni copia el vídeo. PGS/VobSub y otros formatos no compatibles se muestran deshabilitados con indicación de OCR/conversión.
 
-No se elige automáticamente un subtítulo por nombre o idioma: el usuario puede escoger entre varias versiones. `Solo editar` importa texto y tiempos sin inferencia; `Traducir al español` conserva el original y traduce las entradas pendientes. Una importación inválida conserva el borrador para elegir otra fuente. Los originales y sidecars nunca se sobrescriben; Guardar junto al vídeo crea un archivo nuevo en la misma carpeta y Descargar conserva la opción del navegador.
+No se elige automáticamente un subtítulo por nombre o idioma: el usuario puede escoger entre varias versiones. `Ver subtítulos` muestra la pista completa sin iniciar procesamiento; `Editar o mejorar` importa texto y tiempos sin inferencia; `Traducir al español` conserva el original y traduce las entradas pendientes. Una importación inválida conserva el borrador para elegir otra fuente. Los originales y sidecars nunca se sobrescriben; Guardar junto al vídeo crea un archivo nuevo en la misma carpeta y Descargar conserva la opción del navegador.
 
 La previsualización transmite bytes dentro del propio equipo (navegador → API Docker → gateway nativo). No se guarda otra copia del vídeo. La compatibilidad MKV depende del contenedor/códecs admitidos por el navegador; importar sus subtítulos no garantiza reproducción. Si se cambia una ruta por un enlace simbólico se rechaza la referencia.
 
@@ -62,7 +62,13 @@ Referencias técnicas: [SQLAlchemy: conexiones y procesos bifurcados](https://do
 
 ## Previsualización de pistas y navegación
 
-- En borrador, elegir un subtítulo recupera sus primeras ocho entradas con sus marcas de tiempo a través del gateway, sin importar el subtítulo ni iniciar el procesamiento. Si se cambia rápidamente de pista, se descartan las respuestas atrasadas.
+- En borrador, elegir un subtítulo recupera todas sus entradas con sus marcas de tiempo a través del gateway, sin importar el subtítulo ni iniciar el procesamiento. Si se cambia rápidamente de pista, se descartan las respuestas atrasadas.
 - La pista de audio elegida se puede escuchar en un reproductor de muestra MP3 de hasta 30 s, generado por FFmpeg en memoria y sincronizado con el vídeo si este puede reproducirse. La muestra se inicia desde la posición actual del vídeo; el botón «Escuchar desde la posición del vídeo» actualiza ese punto. Al salir del intervalo se solicita generar otra muestra. El vídeo y el audio originales no se copian ni se modifican.
 - Enfocar una fila o pulsar en su área no editable busca su mark-in sin reproducir automáticamente; moverse entre campos de la misma fila no vuelve a saltar. Funciona también cuando los segmentos están en modo lectura durante el procesamiento.
 - Validación: 56 pruebas Python y 22 Node, con un MKV sintético de dos frecuencias para comprobar que cada pista produce audio distinto, validación de índices/timestamps, respuestas atrasadas y eventos de reproducción. Se comprobaron dos pistas de subtítulos y una muestra de audio del borrador de usuario en modo lectura: el proyecto continuó en borrador y no se modificaron sus segmentos. Se verificó el texto en el navegador y la decodificación del MP3 mediante FFmpeg; no se verificó una escucha física por altavoces.
+
+## Ver antes de procesar
+
+La vista muestra la pista seleccionada completa y la superpone al vídeo durante la reproducción en el reproductor integrado. Pulsar un segmento busca su inicio. Para una pista existente no se importa ni inicia ningún trabajo; al elegir audio se transcribe primero y se muestra el resultado en modo lectura, desde donde se puede pasar a editar o traducir. La pantalla completa nativa del vídeo puede ocultar la superposición.
+
+Validación de esta ampliación: 58 pruebas Python y 27 Node. Con la pista 2 de un borrador existente, el navegador cargó 681 segmentos y el primer segmento buscó su mark-in y se mostró sobre el vídeo; el proyecto continuó en borrador. El modo de transcripción para ver y la transición a edición se verificaron con pruebas automatizadas y el servicio nativo simulado, sin ejecutar inferencia real.

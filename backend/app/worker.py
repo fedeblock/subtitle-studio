@@ -74,7 +74,7 @@ def process_project(pid):
                     )
                 db.get(Project, pid).language = result.get("language", "auto")
                 db.commit()
-        if reference(pid).get("action") == "edit":
+        if reference(pid).get("action") in ("edit", "view"):
             set_status(pid, "ready", 100)
             return
         set_status(pid, "translating", 55)

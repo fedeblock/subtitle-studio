@@ -10,7 +10,8 @@ let projects = [],
   editorProject = null,
   viewingTrash = false,
   selectedCue = null,
-  subtitlePreviewRevision = 0;
+  subtitlePreviewRevision = 0,
+  viewedCues = [];
 const $ = (x) => document.getElementById(x),
   esc = (s) =>
     String(s ?? "").replace(
@@ -103,6 +104,7 @@ async function select(pid) {
   }
   if ((dirty.size || pendingEdits()) && !(await settleEdits())) return;
   cleanupAudioPreview();
+  viewedCues = [];
   selected = pid;
   selectedCue = null;
   subtitlePreviewRevision++;
@@ -148,14 +150,18 @@ function renderWorkspace() {
   if (!detail) return;
   let p = detail.project,
     cues = detail.cues;
-  const ready =
+  const finished =
     !viewingTrash && ["ready", "failed"].includes(p.state) && cues.length > 0;
+  const viewMode = finished && p.action === "view";
+  const ready = finished && !viewMode;
   const showReadOnly = !ready && p.state !== "draft" && cues.length > 0;
   const oldScroll = $("editor")?.scrollTop || 0;
   const workspace = $("workspace");
   if (workspace.dataset.projectId !== p.id || !$("video")) {
-    workspace.innerHTML = `<div id="project-header"></div><video id="video" class="player" controls preload="metadata" src="/api/projects/${p.id}/media"></video><div id="media-error" class="notice error" hidden></div><div id="project-content"></div>`;
+    workspace.innerHTML = `<div id="project-header"></div><div class="player-frame"><video id="video" class="player" controls preload="metadata" src="/api/projects/${p.id}/media"></video><div id="video-subtitles" class="video-subtitles" hidden></div></div><div id="media-error" class="notice error" hidden></div><div id="project-content"></div>`;
     workspace.dataset.projectId = p.id;
+    $("video").addEventListener("timeupdate", updateVideoSubtitles);
+    $("video").addEventListener("seeked", updateVideoSubtitles);
     $("video").onerror = () => {
       const message = $("media-error");
       message.hidden = false;
@@ -164,7 +170,7 @@ function renderWorkspace() {
     };
   }
   $("project-header").innerHTML =
-    `<div class="top"><div><h2>${esc(p.name)}</h2><span class="status ${esc(p.state)}">Estado: ${esc(stateName(p))}</span></div>${ready ? '<div class="group"><select id="language"><option value="es">Español</option><option value="original">Original</option></select><select id="format"><option>srt</option><option>vtt</option></select><button id="export" class="primary">Guardar junto al vídeo</button><button id="download">Descargar</button></div>' : ""}<button id="project-remove">${viewingTrash ? "Restaurar" : "Quitar de biblioteca"}</button></div>${p.error ? `<div class="notice error">${esc(p.error)} ${p.state === "failed" && !viewingTrash ? '<button id="retry">Reintentar pendientes</button>' : ""}</div>` : ""}`;
+    `<div class="top"><div><h2>${esc(p.name)}</h2><span class="status ${esc(p.state)}">Estado: ${esc(stateName(p))}</span></div>${finished ? '<div class="group"><select id="language"><option value="es">Español</option><option value="original">Original</option></select><select id="format"><option>srt</option><option>vtt</option></select><button id="export" class="primary">Guardar junto al vídeo</button><button id="download">Descargar</button></div>' : ""}<button id="project-remove">${viewingTrash ? "Restaurar" : "Quitar de biblioteca"}</button></div>${p.error ? `<div class="notice error">${esc(p.error)} ${p.state === "failed" && !viewingTrash ? '<button id="retry">Reintentar pendientes</button>' : ""}</div>` : ""}`;
   if (!ready) {
     cueEditor = null;
     editorProject = null;
@@ -193,13 +199,24 @@ function renderWorkspace() {
     cueEditor.reconcile(cues);
   cleanupAudioPreview();
   $("project-content").innerHTML =
-    `<div class="controls"><span class="muted">${cues.length} segmentos · ${p.source_kind === "reference" ? "Archivo original, sin copia" : "Copia local existente"}</span></div>${ready ? editorMarkup(cues, p) : showReadOnly ? editorMarkup(cues, p, true) : p.state === "draft" ? (viewingTrash ? '<div class="notice">Restaura el proyecto para procesarlo.</div>' : sourceChoices(p)) : '<div class="notice">Puedes previsualizar el original mientras se procesa. Durante la transcripción no hay un porcentaje de avance disponible; la primera ejecución puede necesitar descargar modelos.</div>'}`;
+    `<div class="controls"><span class="muted">${cues.length} segmentos · ${p.source_kind === "reference" ? "Archivo original, sin copia" : "Copia local existente"}</span></div>${viewMode ? `<div class="group"><button id="edit-view">Editar o mejorar</button>${cues.some(c => !(c.translated || "").trim()) ? '<button id="translate-view">Traducir pendientes</button>' : ""}</div>` : ""}${ready ? editorMarkup(cues, p) : showReadOnly ? editorMarkup(cues, p, true) : p.state === "draft" ? (viewingTrash ? '<div class="notice">Restaura el proyecto para procesarlo.</div>' : sourceChoices(p)) : '<div class="notice">Puedes previsualizar el original mientras se procesa. Durante la transcripción no hay un porcentaje de avance disponible; la primera ejecución puede necesitar descargar modelos.</div>'}`;
+  if (viewMode) {
+    viewedCues = cues;
+    updateVideoSubtitles();
+    $("edit-view").onclick = () => editViewedProject(p.id);
+    if ($("translate-view")) $("translate-view").onclick = () => translatePending(p.id);
+  }
   if ($("editor")) $("editor").scrollTop = oldScroll;
   if ($("project-remove"))
     $("project-remove").onclick = () => removeProject(p.id);
   if ($("start-project")) {
     $("start-project").onclick = () => startProject(p.id);
-    $("subtitle-source").onchange = () => loadSubtitlePreview(p.id);
+    $("subtitle-source").onchange = () => {
+      updateDraftAction();
+      return loadSubtitlePreview(p.id);
+    };
+    $("subtitle-action").onchange = updateDraftAction;
+    updateDraftAction();
     if ($("audio-track")) {
       $("audio-track").onchange = () => configureAudioPreview(p.id);
       $("refresh-audio-preview").onclick = () => configureAudioPreview(p.id);
@@ -222,8 +239,8 @@ function renderWorkspace() {
     });
   }
   if ($("retry")) $("retry").onclick = () => retryProject(p.id);
-  if (ready) {
-    if (p.action === "edit") $("language").value = "original";
+  if (finished) {
+    if (p.action === "edit" || p.action === "view") $("language").value = "original";
     $("export").onclick = async () => {
       if (busy || !(await settleEdits())) return;
       busy = true;
@@ -247,6 +264,8 @@ function renderWorkspace() {
       if (busy || !(await settleEdits())) return;
       location.href = `/api/projects/${p.id}/export?language=${$("language").value}&format=${$("format").value}`;
     };
+  }
+  if (ready) {
     if ($("translate-pending"))
       $("translate-pending").onclick = () => translatePending(p.id);
     document.querySelectorAll(".cue[data-cue]").forEach((row) => {
@@ -285,19 +304,34 @@ function seekCue(row) {
   selectedCue = row.dataset.cue;
   $("video").currentTime = start;
 }
+function updateVideoSubtitles() {
+  const video = $("video"),
+    display = $("video-subtitles");
+  if (!video || !display) return;
+  const now = video.currentTime;
+  const lines = viewedCues
+    .filter((cue) => cue.start <= now && now < cue.end)
+    .map((cue) => cue.original);
+  display.textContent = lines.join("\n");
+  display.hidden = lines.length === 0;
+}
+
 async function loadSubtitlePreview(pid) {
   const select = $("subtitle-source"),
     target = $("subtitle-preview");
   if (!select || !target) return;
   const source = select.value,
     revision = ++subtitlePreviewRevision;
+  viewedCues = [];
+  updateVideoSubtitles();
   if (!source || source === "asr") {
     target.hidden = true;
     target.innerHTML = "";
     return;
   }
   target.hidden = false;
-  target.textContent = "Cargando muestra del subtítulo…";
+  target.dataset.loadedSource = "";
+  target.textContent = "Cargando subtítulos…";
   try {
     const data = await api(
       `/api/projects/${pid}/subtitle-preview?subtitle_id=${encodeURIComponent(source)}`,
@@ -309,7 +343,16 @@ async function loadSubtitlePreview(pid) {
       select.value !== source
     )
       return;
-    target.innerHTML = `<strong>Muestra de esta pista</strong>${data.cues.length ? `<ol>${data.cues.map((c) => `<li><span class="tiny">${time(c.start)}</span> ${esc(c.original)}</li>`).join("")}</ol>` : "<p>No se encontraron líneas con tiempos válidos.</p>"}`;
+    viewedCues = data.cues;
+    updateVideoSubtitles();
+    target.dataset.loadedSource = source;
+    target.innerHTML = `<strong>Subtítulos de esta pista · ${data.cues.length} segmentos</strong><p class="tiny">Solo lectura. Selecciona un segmento para ir a ese momento del vídeo.</p>${data.cues.length ? `<ol>${data.cues.map((c) => `<li><button type="button" class="preview-segment" data-start="${Number(c.start)}"><span class="tiny">${time(c.start)}</span> ${esc(c.original)}</button></li>`).join("")}</ol>` : "<p>No se encontraron líneas con tiempos válidos.</p>"}`;
+    target.onclick = (event) => {
+      const entry = event.target.closest?.(".preview-segment");
+      if (!entry || !target.contains(entry)) return;
+      const start = Number(entry.dataset.start);
+      if (Number.isFinite(start) && $("video")) $("video").currentTime = start;
+    };
   } catch (error) {
     if (revision === subtitlePreviewRevision && $("subtitle-source") === select)
       target.textContent = `No se pudo mostrar la pista: ${error.message}`;
@@ -442,7 +485,7 @@ function pendingEdits() {
 }
 function editorMarkup(cues, project, readOnly = false) {
   const toolbar = readOnly
-    ? '<div class="notice">Segmentos visibles en modo lectura mientras se procesa; la edición se reactivará al terminar.</div>'
+    ? `<div class="notice">${project.action === "view" && project.state === "ready" ? "Vista de solo lectura. Puedes elegir editar o traducir cuando quieras." : "Segmentos visibles en modo lectura mientras se procesa; la edición se reactivará al terminar."}</div>`
     : `<div class="editor-toolbar"><div class="group"><button id="undo-edit" title="Deshacer (⌘Z / Ctrl+Z)">↶ Deshacer</button><button id="redo-edit" title="Rehacer (⌘⇧Z / Ctrl+Shift+Z)">↷ Rehacer</button><button id="retry-save" hidden>Reintentar guardado</button><button id="improve-text" title="Corregir puntuación y mayúsculas con Ollama">Mejorar transcripción</button>${cues.some((c) => !(c.translated || "").trim()) ? '<button id="translate-pending">Traducir pendientes</button>' : ""}${project.can_undo_improvement ? '<button id="undo-improvement">Revertir última mejora</button>' : ""}</div><span id="save-status" role="status" aria-live="polite"></span></div><p class="tiny">Guardado automático al salir de cada campo · Deshacer disponible durante esta sesión del proyecto.</p>`;
   return `${toolbar}<div class="editor" id="editor"><table class="subtitle-table"><colgroup><col class="number-col"><col class="time-col"><col class="time-col"><col><col></colgroup><thead><tr><th scope="col">#</th><th scope="col">mark-in</th><th scope="col">mark-out</th><th scope="col">sub original (o transcripción)</th><th scope="col">traducción</th></tr></thead><tbody>${cues
     .map((item, i) => {
@@ -599,13 +642,33 @@ async function undoImprovement(pid) {
 function sourceChoices(p) {
   const options = p.subtitle_options || [],
     tracks = p.audio_tracks || [];
-  return `<div class="notice"><h2>¿Qué subtítulos quieres usar?</h2><p>El vídeo se lee desde su ubicación original. No se copia ni se envía a Internet.</p><label>Fuente <select id="subtitle-source"><option value="" selected disabled>Elige una fuente</option><option value="asr">Generar desde el audio con ASR</option>${options.map((o) => `<option value="${esc(o.id)}" ${o.supported ? "" : "disabled"}>${esc(o.label)} · ${o.kind === "embedded" ? "incrustado" : "archivo"}${o.supported ? "" : " · requiere OCR/conversión"}</option>`).join("")}</select></label>${tracks.length ? `<label> Pista de audio para transcribir <select id="audio-track">${tracks.map((t) => `<option value="${t.index}">${esc(t.label)}</option>`).join("")}</select></label><div class="audio-sample"><audio id="audio-preview" controls preload="none"></audio><div id="audio-preview-position" class="tiny"></div><button id="refresh-audio-preview" type="button">Escuchar desde la posición del vídeo</button></div>` : ""}<div id="subtitle-preview" class="subtitle-preview" hidden></div><label> Acción <select id="subtitle-action"><option value="translate">Traducir al español directamente</option><option value="edit">Revisar y mejorar antes de traducir</option></select></label><button id="start-project" class="primary">Continuar</button>${options.length ? "" : "<p>No se encontraron archivos de subtítulos ni pistas incrustadas.</p>"}${(p.source_warnings || []).map((w) => `<p>${esc(w)}</p>`).join("")}</div>`;
+  return `<div class="notice"><h2>¿Qué subtítulos quieres usar?</h2><p>El vídeo se lee desde su ubicación original. No se copia ni se envía a Internet.</p><label>Fuente <select id="subtitle-source"><option value="" selected disabled>Elige una fuente</option><option value="asr">Generar desde el audio con ASR</option>${options.map((o) => `<option value="${esc(o.id)}" ${o.supported ? "" : "disabled"}>${esc(o.label)} · ${o.kind === "embedded" ? "incrustado" : "archivo"}${o.supported ? "" : " · requiere OCR/conversión"}</option>`).join("")}</select></label>${tracks.length ? `<label> Pista de audio para transcribir <select id="audio-track">${tracks.map((t) => `<option value="${t.index}">${esc(t.label)}</option>`).join("")}</select></label><div class="audio-sample"><audio id="audio-preview" controls preload="none"></audio><div id="audio-preview-position" class="tiny"></div><button id="refresh-audio-preview" type="button">Escuchar desde la posición del vídeo</button></div>` : ""}<div id="subtitle-preview" class="subtitle-preview" hidden></div><label> Acción <select id="subtitle-action"><option value="view" selected>Ver subtítulos</option><option value="edit">Editar o mejorar</option><option value="translate">Traducir al español</option></select></label><button id="start-project" class="primary">Ver subtítulos</button>${options.length ? "" : "<p>No se encontraron archivos de subtítulos ni pistas incrustadas.</p>"}${(p.source_warnings || []).map((w) => `<p>${esc(w)}</p>`).join("")}</div>`;
+}
+function updateDraftAction() {
+  if (!$("start-project") || !$("subtitle-action") || !$("subtitle-source"))
+    return;
+  const viewing = $("subtitle-action").value === "view";
+  $("start-project").textContent = viewing
+    ? $("subtitle-source").value === "asr"
+      ? "Transcribir para ver"
+      : "Ver subtítulos"
+    : "Continuar";
 }
 async function startProject(pid) {
   if (busy) return;
   const source = $("subtitle-source").value;
   if (!source) {
     alert("Elige una fuente de subtítulos.");
+    return;
+  }
+  const action = $("subtitle-action").value;
+  if (action === "view" && source !== "asr") {
+    if ($("subtitle-preview").dataset.loadedSource !== source)
+      await loadSubtitlePreview(pid);
+    $("subtitle-preview")?.scrollIntoView?.({
+      block: "nearest",
+      behavior: "smooth",
+    });
     return;
   }
   busy = true;
@@ -616,7 +679,7 @@ async function startProject(pid) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         source,
-        action: $("subtitle-action").value,
+        action,
         audio_index:
           source === "asr" && $("audio-track")
             ? Number($("audio-track").value)
@@ -629,6 +692,20 @@ async function startProject(pid) {
   } catch (e) {
     alert(e.message);
     if ($("start-project")) $("start-project").disabled = false;
+  } finally {
+    busy = false;
+  }
+}
+async function editViewedProject(pid) {
+  if (busy) return;
+  busy = true;
+  try {
+    await api(`/api/projects/${pid}/edit-mode`, { method: "POST" });
+    busy = false;
+    await select(pid);
+    await refresh();
+  } catch (error) {
+    alert(error.message);
   } finally {
     busy = false;
   }
@@ -653,6 +730,7 @@ async function resetWorkspace() {
   if (busy || !(await settleEdits())) return false;
   cleanupAudioPreview();
   selected = null;
+  viewedCues = [];
   detail = null;
   cueEditor = null;
   editorProject = null;

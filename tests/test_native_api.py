@@ -207,6 +207,38 @@ def test_selected_audio_is_saved_and_sent_to_worker(client, monkeypatch):
     assert seen == [("/transcribe", {"project_id": pid, "audio_index": 3})]
 
 
+def test_transcribe_to_view_then_enter_edit_mode(client, monkeypatch):
+    from app import worker
+
+    pid = local_project()
+    monkeypatch.setattr(
+        main, "queue", lambda: SimpleNamespace(enqueue=lambda *a, **kw: None)
+    )
+    seen = []
+
+    def native(path, payload, **kwargs):
+        seen.append(path)
+        return {"srt": "1\n00:00:00,000 --> 00:00:01,000\nHello\n"}
+
+    monkeypatch.setattr(worker, "mac_post", native)
+    assert (
+        client.post(
+            f"/api/projects/{pid}/start", json={"source": "asr", "action": "view"}
+        ).status_code
+        == 200
+    )
+    worker.process_project(pid)
+    detail = client.get(f"/api/projects/{pid}").json()
+    assert seen == ["/transcribe"]
+    assert detail["project"]["state"] == "ready"
+    assert detail["project"]["action"] == "view"
+    assert detail["cues"][0]["original"] == "Hello"
+    assert client.post(f"/api/projects/{pid}/edit-mode").status_code == 200
+    edited = client.get(f"/api/projects/{pid}").json()
+    assert edited["project"]["action"] == "edit"
+    assert edited["cues"] == detail["cues"]
+
+
 def test_selected_audio_must_be_from_inspected_tracks(client):
     pid = local_project()
     response = client.post(
@@ -298,3 +330,25 @@ def test_audio_preview_passes_validated_track_and_position(client, monkeypatch):
         client.get(f"/api/projects/{pid}/audio-preview?index=3&start=nan").status_code
         == 422
     )
+
+
+def test_subtitle_preview_returns_all_segments_and_full_text(client, monkeypatch):
+    pid = local_project()
+    long_text = "A" * 700
+    chunks = [
+        f"{i}\n00:00:{i:02},000 --> 00:00:{i:02},900\n"
+        + (long_text if i == 1 else f"Line {i}")
+        for i in range(1, 13)
+    ]
+    monkeypatch.setattr(
+        main,
+        "native_request",
+        lambda *a, **kw: SimpleNamespace(json=lambda: {"srt": "\n\n".join(chunks)}),
+    )
+    response = client.get(
+        f"/api/projects/{pid}/subtitle-preview", params={"subtitle_id": "srt1"}
+    )
+    assert response.status_code == 200
+    assert len(response.json()["cues"]) == 12
+    assert response.json()["cues"][0]["original"] == long_text
+    assert client.get(f"/api/projects/{pid}").json()["project"]["state"] == "draft"
