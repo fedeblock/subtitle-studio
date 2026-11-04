@@ -290,3 +290,158 @@ test("draft in trash must be restored before it can start", () => {
     /Restaura/,
   );
 });
+
+test("focusing a subtitle seeks to mark-in without autoplay", () => {
+  const c = editorSetup(),
+    doc = c.document;
+  const video = doc.getElementById("video"),
+    row = doc.querySelector("tr.cue");
+  row.dataset.start = "12.5";
+  let plays = 0;
+  video.play = () => {
+    plays++;
+  };
+  video.currentTime = 0;
+  row.onfocusin({ target: row.querySelector(".original") });
+  assert.equal(video.currentTime, 12.5);
+  assert.equal(plays, 0);
+  video.currentTime = 14;
+  row.onfocusin({ target: row.querySelector(".translated") });
+  assert.equal(video.currentTime, 14);
+  row.onclick({ target: row.querySelector(".cue-number") });
+  assert.equal(video.currentTime, 12.5);
+});
+
+test("subtitle source selection shows text and ignores slower previous response", async () => {
+  const c = editorSetup(),
+    a = deferred(),
+    b = deferred();
+  evaluate(
+    c,
+    "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[],subtitle_options:[{id:'s1',kind:'embedded',label:'1',supported:true},{id:'s2',kind:'embedded',label:'2',supported:true}]},cues:[]};renderWorkspace();",
+  );
+  const select = c.document.getElementById("subtitle-source");
+  c.api = (url) => (url.includes("s1") ? a.promise : b.promise);
+  // LinkeDOM treats the selected option attribute as the source of select.value.
+  const options = select.querySelectorAll("option");
+  options.forEach((o) => o.removeAttribute("selected"));
+  options[2].setAttribute("selected", "");
+  const first = select.onchange();
+  options[2].removeAttribute("selected");
+  options[3].setAttribute("selected", "");
+  const second = select.onchange();
+  b.resolve({ cues: [{ start: 1, end: 2, original: "Newest track" }] });
+  await second;
+  a.resolve({ cues: [{ start: 1, end: 2, original: "Stale track" }] });
+  await first;
+  assert.match(
+    c.document.getElementById("subtitle-preview").textContent,
+    /Newest track/,
+  );
+  assert.doesNotMatch(
+    c.document.getElementById("subtitle-preview").textContent,
+    /Stale track/,
+  );
+});
+
+test("audio preview follows selected track and chosen video position", () => {
+  const c = editorSetup();
+  evaluate(
+    c,
+    "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[{index:2,label:'English'},{index:3,label:'Spanish'}],subtitle_options:[]},cues:[]};renderWorkspace();",
+  );
+  const doc = c.document,
+    select = doc.getElementById("audio-track");
+  const options = select.querySelectorAll("option");
+  options.forEach((o) => o.removeAttribute("selected"));
+  options[1].setAttribute("selected", "");
+  doc.getElementById("video").currentTime = 95.123;
+  select.onchange();
+  assert.match(
+    doc.getElementById("audio-preview").src,
+    /index=3&start=95\.123/,
+  );
+  assert.match(
+    doc.getElementById("audio-preview-position").textContent,
+    /00:01:35\.123/,
+  );
+});
+
+test("returning to same subtitle after leaving it seeks again", () => {
+  const c = editorSetup(),
+    doc = c.document,
+    row = doc.querySelector("tr.cue"),
+    video = doc.getElementById("video");
+  row.dataset.start = "7";
+  video.currentTime = 0;
+  row.onfocusin({ target: row.querySelector(".original") });
+  assert.equal(video.currentTime, 7);
+  row.onfocusout({ relatedTarget: video });
+  video.currentTime = 20;
+  row.onfocusin({ target: row.querySelector(".original") });
+  assert.equal(video.currentTime, 7);
+});
+
+test("pausing or seeking video controls also updates playing track sample", () => {
+  const c = editorSetup();
+  evaluate(
+    c,
+    "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[{index:2,label:'English'}],subtitle_options:[]},cues:[]};renderWorkspace();",
+  );
+  const doc = c.document,
+    select = doc.getElementById("audio-track");
+  select.querySelector("option").setAttribute("selected", "");
+  const previous = doc.getElementById("audio-preview"),
+    video = doc.getElementById("video");
+  video.currentTime = 10;
+  select.onchange();
+  const audio = doc.getElementById("audio-preview");
+  assert.notEqual(audio, previous);
+  Object.defineProperty(audio, "paused", { value: false, writable: true });
+  Object.defineProperty(video, "paused", { value: false, writable: true });
+  audio.currentTime = 0;
+  audio.duration = 30;
+  audio.pause = () => {
+    audio.paused = true;
+  };
+  video.muted = false;
+  video.play = () => Promise.resolve();
+  video.pause = () => {};
+  audio.paused = false;
+  audio.onplay();
+  video.onplaying();
+  video.currentTime = 15;
+  video.onseeked();
+  assert.equal(audio.currentTime, 5);
+  video.paused = true;
+  video.onpause();
+  assert.equal(audio.paused, true);
+});
+
+test("stale video pause event cannot silence a newly playing sample", () => {
+  const c = editorSetup();
+  evaluate(
+    c,
+    "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[{index:2,label:'English'}],subtitle_options:[]},cues:[]};renderWorkspace();",
+  );
+  const doc = c.document,
+    video = doc.getElementById("video"),
+    select = doc.getElementById("audio-track");
+  select.querySelector("option").setAttribute("selected", "");
+  select.onchange();
+  const audio = doc.getElementById("audio-preview");
+  Object.defineProperty(audio, "paused", { value: false, writable: true });
+  Object.defineProperty(video, "paused", { value: false, writable: true });
+  audio.currentTime = 0;
+  audio.duration = 30;
+  audio.pause = () => {
+    audio.paused = true;
+  };
+  video.currentTime = 0;
+  video.muted = false;
+  video.play = () => Promise.resolve();
+  video.pause = () => {};
+  audio.onplay();
+  video.onpause();
+  assert.equal(audio.paused, false);
+});

@@ -7,7 +7,7 @@ import secrets
 import subprocess
 from contextlib import asynccontextmanager, suppress
 from model_runtime import ASRRuntime, MLXSession, clear_metal
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse, FileResponse, Response
 from uuid import UUID
 from typing import Literal
@@ -16,6 +16,7 @@ from local_files import (
     choose_local_file,
     discover_subtitles,
     discover_audio,
+    audio_preview,
     read_subtitle,
     MEDIA_EXTENSIONS,
 )
@@ -176,6 +177,27 @@ def select_file(req: TranscribeRequest):
 @app.api_route("/files/{pid}/media", methods=["GET", "HEAD"])
 def local_media(pid: UUID):
     return FileResponse(resolve_source(pid))
+
+
+@app.get("/files/{pid}/audio-preview")
+def preview_audio(
+    pid: UUID,
+    index: int = Query(ge=0),
+    start: float = Query(default=0, ge=0, allow_inf_nan=False),
+):
+    source = resolve_source(pid)
+    reference = load_reference(project_folder(pid))
+    if index not in [item["index"] for item in reference.get("audio_tracks", [])]:
+        raise HTTPException(400, "Pista de audio no autorizada o inexistente")
+    try:
+        data = audio_preview(source, index, start)
+        return Response(
+            data, media_type="audio/mpeg", headers={"Cache-Control": "no-store"}
+        )
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        raise HTTPException(
+            409, "No se pudo reproducir esta pista en esa posición"
+        ) from exc
 
 
 class SubtitleRequest(TranscribeRequest):

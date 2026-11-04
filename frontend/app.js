@@ -8,7 +8,9 @@ let projects = [],
   editRevision = 0,
   cueEditor = null,
   editorProject = null,
-  viewingTrash = false;
+  viewingTrash = false,
+  selectedCue = null,
+  subtitlePreviewRevision = 0;
 const $ = (x) => document.getElementById(x),
   esc = (s) =>
     String(s ?? "").replace(
@@ -100,7 +102,10 @@ async function select(pid) {
     return;
   }
   if ((dirty.size || pendingEdits()) && !(await settleEdits())) return;
+  cleanupAudioPreview();
   selected = pid;
+  selectedCue = null;
+  subtitlePreviewRevision++;
   if (editorProject !== pid) {
     cueEditor = null;
     editorProject = null;
@@ -186,12 +191,36 @@ function renderWorkspace() {
   }
   if (ready && cueEditor && !dirty.size && !pendingEdits())
     cueEditor.reconcile(cues);
+  cleanupAudioPreview();
   $("project-content").innerHTML =
     `<div class="controls"><span class="muted">${cues.length} segmentos · ${p.source_kind === "reference" ? "Archivo original, sin copia" : "Copia local existente"}</span></div>${ready ? editorMarkup(cues, p) : showReadOnly ? editorMarkup(cues, p, true) : p.state === "draft" ? (viewingTrash ? '<div class="notice">Restaura el proyecto para procesarlo.</div>' : sourceChoices(p)) : '<div class="notice">Puedes previsualizar el original mientras se procesa. Durante la transcripción no hay un porcentaje de avance disponible; la primera ejecución puede necesitar descargar modelos.</div>'}`;
   if ($("editor")) $("editor").scrollTop = oldScroll;
   if ($("project-remove"))
     $("project-remove").onclick = () => removeProject(p.id);
-  if ($("start-project")) $("start-project").onclick = () => startProject(p.id);
+  if ($("start-project")) {
+    $("start-project").onclick = () => startProject(p.id);
+    $("subtitle-source").onchange = () => loadSubtitlePreview(p.id);
+    if ($("audio-track")) {
+      $("audio-track").onchange = () => configureAudioPreview(p.id);
+      $("refresh-audio-preview").onclick = () => configureAudioPreview(p.id);
+      configureAudioPreview(p.id);
+    }
+  }
+  if (cues.length) {
+    document.querySelectorAll(".cue[data-cue]").forEach((row) => {
+      row.onfocusin = () => {
+        if (selectedCue !== row.dataset.cue) seekCue(row);
+      };
+      row.onfocusout = (event) => {
+        if (!event.relatedTarget || !row.contains(event.relatedTarget))
+          selectedCue = null;
+      };
+      row.onclick = (event) => {
+        if (!["TEXTAREA", "INPUT", "BUTTON"].includes(event.target.tagName))
+          seekCue(row);
+      };
+    });
+  }
   if ($("retry")) $("retry").onclick = () => retryProject(p.id);
   if (ready) {
     if (p.action === "edit") $("language").value = "original";
@@ -229,11 +258,6 @@ function renderWorkspace() {
         };
         el.onblur = () => commitField(row, el);
       });
-      row.ondblclick = (e) => {
-        if (["TEXTAREA", "INPUT", "BUTTON"].includes(e.target.tagName)) return;
-        $("video").currentTime = +row.dataset.start;
-        $("video").play();
-      };
     });
     $("improve-text").onclick = () => improveText(p.id);
     if ($("undo-improvement"))
@@ -255,6 +279,150 @@ function renderWorkspace() {
     };
   }
 }
+function seekCue(row) {
+  const start = Number(row.dataset.start);
+  if (!Number.isFinite(start) || !$("video")) return;
+  selectedCue = row.dataset.cue;
+  $("video").currentTime = start;
+}
+async function loadSubtitlePreview(pid) {
+  const select = $("subtitle-source"),
+    target = $("subtitle-preview");
+  if (!select || !target) return;
+  const source = select.value,
+    revision = ++subtitlePreviewRevision;
+  if (!source || source === "asr") {
+    target.hidden = true;
+    target.innerHTML = "";
+    return;
+  }
+  target.hidden = false;
+  target.textContent = "Cargando muestra del subtítulo…";
+  try {
+    const data = await api(
+      `/api/projects/${pid}/subtitle-preview?subtitle_id=${encodeURIComponent(source)}`,
+    );
+    if (
+      revision !== subtitlePreviewRevision ||
+      $("subtitle-source") !== select ||
+      selected !== pid ||
+      select.value !== source
+    )
+      return;
+    target.innerHTML = `<strong>Muestra de esta pista</strong>${data.cues.length ? `<ol>${data.cues.map((c) => `<li><span class="tiny">${time(c.start)}</span> ${esc(c.original)}</li>`).join("")}</ol>` : "<p>No se encontraron líneas con tiempos válidos.</p>"}`;
+  } catch (error) {
+    if (revision === subtitlePreviewRevision && $("subtitle-source") === select)
+      target.textContent = `No se pudo mostrar la pista: ${error.message}`;
+  }
+}
+function cleanupAudioPreview() {
+  const audio = $("audio-preview"),
+    video = $("video");
+  if (!audio || !video) return;
+  const active = audio.paused === false;
+  audio.onpause = audio.onplay = audio.ontimeupdate = null;
+  video.onpause = video.onplay = video.onplaying = video.onseeked = null;
+  if (active) {
+    audio.pause();
+    video.pause();
+    video.muted = audio.dataset.previousMuted === "1";
+  }
+}
+function configureAudioPreview(pid) {
+  const select = $("audio-track"),
+    previous = $("audio-preview"),
+    video = $("video");
+  if (!select || !previous || !video) return;
+  // A fresh element prevents queued events from the previous sample affecting this one.
+  cleanupAudioPreview();
+  const audio = previous.cloneNode(false);
+  previous.replaceWith(audio);
+  const start = Number.isFinite(video.currentTime)
+    ? Math.max(0, video.currentTime)
+    : 0;
+  const index = Number(select.value);
+  if (!Number.isInteger(index) || index < 0) return;
+  let sampleActive = false,
+    videoStarted = false;
+  const sampleDuration = () =>
+    Number.isFinite(audio.duration) ? Math.min(audio.duration, 30) : 30;
+  audio.dataset.start = String(start);
+  audio.src = `/api/projects/${pid}/audio-preview?index=${index}&start=${start.toFixed(3)}`;
+  $("audio-preview-position").textContent =
+    `Muestra de hasta 30 s desde ${time(start)}. Usa los controles para escucharla.`;
+  audio.onplay = () => {
+    sampleActive = true;
+    videoStarted = false;
+    audio.dataset.previousMuted = video.muted ? "1" : "0";
+    video.muted = true;
+    try {
+      video.currentTime = start + audio.currentTime;
+    } catch {}
+    try {
+      const playing = video.play();
+      if (playing?.catch) playing.catch(() => {});
+    } catch {}
+  };
+  audio.ontimeupdate = () => {
+    if (
+      !audio.paused &&
+      Math.abs(video.currentTime - (start + audio.currentTime)) > 0.8
+    ) {
+      try {
+        video.currentTime = start + audio.currentTime;
+      } catch {}
+    }
+  };
+  audio.onpause = () => {
+    video.pause();
+    video.muted = audio.dataset.previousMuted === "1";
+  };
+  audio.onended = () => {
+    sampleActive = false;
+  };
+  audio.onerror = () => {
+    sampleActive = false;
+    $("audio-preview-position").textContent =
+      "No se puede escuchar esta pista en esta posición. Prueba otra posición o pista.";
+  };
+  video.onplaying = () => {
+    if (sampleActive && video.paused === false) videoStarted = true;
+  };
+  video.onpause = () => {
+    if (
+      sampleActive &&
+      videoStarted &&
+      video.paused === true &&
+      audio.paused === false
+    )
+      audio.pause();
+  };
+  video.onplay = () => {
+    if (
+      sampleActive &&
+      audio.paused &&
+      video.currentTime >= start &&
+      video.currentTime < start + sampleDuration()
+    ) {
+      const playing = audio.play();
+      if (playing?.catch) playing.catch(() => {});
+    }
+  };
+  video.onseeked = () => {
+    if (!sampleActive) return;
+    const position = video.currentTime - start;
+    if (position < 0 || position >= sampleDuration()) {
+      sampleActive = false;
+      if (!audio.paused) audio.pause();
+      $("audio-preview-position").textContent =
+        "Posición fuera de la muestra. Pulsa «Escuchar desde la posición del vídeo».";
+      return;
+    }
+    if (Math.abs(audio.currentTime - position) > 0.4)
+      audio.currentTime = position;
+  };
+}
+
 async function retryProject(pid) {
   if (busy || !(await settleEdits())) return;
   busy = true;
@@ -279,7 +447,7 @@ function editorMarkup(cues, project, readOnly = false) {
   return `${toolbar}<div class="editor" id="editor"><table class="subtitle-table"><colgroup><col class="number-col"><col class="time-col"><col class="time-col"><col><col></colgroup><thead><tr><th scope="col">#</th><th scope="col">mark-in</th><th scope="col">mark-out</th><th scope="col">sub original (o transcripción)</th><th scope="col">traducción</th></tr></thead><tbody>${cues
     .map((item, i) => {
       const c = cueEditor?.get(item.id) || item;
-      return `<tr class="cue" data-cue="${c.id}" data-start="${c.start}" data-end="${c.end}"><td class="cue-number">${i + 1}</td><td><input aria-label="Mark-in ${i + 1}" class="start" data-field="start" ${readOnly ? "readonly" : ""} value="${time(c.start)}"></td><td><input aria-label="Mark-out ${i + 1}" class="end" data-field="end" ${readOnly ? "readonly" : ""} value="${time(c.end)}"></td><td><textarea class="original" data-field="original" ${readOnly ? "readonly" : ""} aria-label="Original ${i + 1}">${esc(c.original)}</textarea></td><td><textarea class="translated" data-field="translated" ${readOnly ? "readonly" : ""} aria-label="Traducción ${i + 1}">${esc(c.translated)}</textarea></td></tr>`;
+      return `<tr class="cue" tabindex="0" data-cue="${c.id}" data-start="${c.start}" data-end="${c.end}"><td class="cue-number">${i + 1}</td><td><input aria-label="Mark-in ${i + 1}" class="start" data-field="start" ${readOnly ? "readonly" : ""} value="${time(c.start)}"></td><td><input aria-label="Mark-out ${i + 1}" class="end" data-field="end" ${readOnly ? "readonly" : ""} value="${time(c.end)}"></td><td><textarea class="original" data-field="original" ${readOnly ? "readonly" : ""} aria-label="Original ${i + 1}">${esc(c.original)}</textarea></td><td><textarea class="translated" data-field="translated" ${readOnly ? "readonly" : ""} aria-label="Traducción ${i + 1}">${esc(c.translated)}</textarea></td></tr>`;
     })
     .join("")}</tbody></table></div>`;
 }
@@ -431,7 +599,7 @@ async function undoImprovement(pid) {
 function sourceChoices(p) {
   const options = p.subtitle_options || [],
     tracks = p.audio_tracks || [];
-  return `<div class="notice"><h2>¿Qué subtítulos quieres usar?</h2><p>El vídeo se lee desde su ubicación original. No se copia ni se envía a Internet.</p><label>Fuente <select id="subtitle-source"><option value="" selected disabled>Elige una fuente</option><option value="asr">Generar desde el audio con ASR</option>${options.map((o) => `<option value="${esc(o.id)}" ${o.supported ? "" : "disabled"}>${esc(o.label)} · ${o.kind === "embedded" ? "incrustado" : "archivo"}${o.supported ? "" : " · requiere OCR/conversión"}</option>`).join("")}</select></label>${tracks.length ? `<label> Pista de audio para transcribir <select id="audio-track">${tracks.map((t) => `<option value="${t.index}">${esc(t.label)}</option>`).join("")}</select></label>` : ""}<label> Acción <select id="subtitle-action"><option value="translate">Traducir al español directamente</option><option value="edit">Revisar y mejorar antes de traducir</option></select></label><button id="start-project" class="primary">Continuar</button>${options.length ? "" : "<p>No se encontraron archivos de subtítulos ni pistas incrustadas.</p>"}${(p.source_warnings || []).map((w) => `<p>${esc(w)}</p>`).join("")}</div>`;
+  return `<div class="notice"><h2>¿Qué subtítulos quieres usar?</h2><p>El vídeo se lee desde su ubicación original. No se copia ni se envía a Internet.</p><label>Fuente <select id="subtitle-source"><option value="" selected disabled>Elige una fuente</option><option value="asr">Generar desde el audio con ASR</option>${options.map((o) => `<option value="${esc(o.id)}" ${o.supported ? "" : "disabled"}>${esc(o.label)} · ${o.kind === "embedded" ? "incrustado" : "archivo"}${o.supported ? "" : " · requiere OCR/conversión"}</option>`).join("")}</select></label>${tracks.length ? `<label> Pista de audio para transcribir <select id="audio-track">${tracks.map((t) => `<option value="${t.index}">${esc(t.label)}</option>`).join("")}</select></label><div class="audio-sample"><audio id="audio-preview" controls preload="none"></audio><div id="audio-preview-position" class="tiny"></div><button id="refresh-audio-preview" type="button">Escuchar desde la posición del vídeo</button></div>` : ""}<div id="subtitle-preview" class="subtitle-preview" hidden></div><label> Acción <select id="subtitle-action"><option value="translate">Traducir al español directamente</option><option value="edit">Revisar y mejorar antes de traducir</option></select></label><button id="start-project" class="primary">Continuar</button>${options.length ? "" : "<p>No se encontraron archivos de subtítulos ni pistas incrustadas.</p>"}${(p.source_warnings || []).map((w) => `<p>${esc(w)}</p>`).join("")}</div>`;
 }
 async function startProject(pid) {
   if (busy) return;
@@ -483,6 +651,7 @@ async function translatePending(pid) {
 }
 async function resetWorkspace() {
   if (busy || !(await settleEdits())) return false;
+  cleanupAudioPreview();
   selected = null;
   detail = null;
   cueEditor = null;

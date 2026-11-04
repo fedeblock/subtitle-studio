@@ -270,6 +270,65 @@ class StartRequest(BaseModel):
     audio_index: int | None = Field(default=None, ge=0)
 
 
+@app.get("/api/projects/{pid}/subtitle-preview")
+def subtitle_preview(pid: str, subtitle_id: str = Query(min_length=1, max_length=64)):
+    with SessionLocal() as db:
+        project = db.get(Project, pid)
+        if not project:
+            raise HTTPException(404)
+        require_visible(db, pid)
+        if project.state != "draft":
+            raise HTTPException(
+                409, "La vista previa de pistas está disponible antes de comenzar"
+            )
+    result = native_request(
+        "POST", "/files/subtitle", json={"project_id": pid, "subtitle_id": subtitle_id}
+    ).json()
+    try:
+        cues = parse_srt(result["srt"])
+    except (ValueError, IndexError) as exc:
+        raise HTTPException(
+            422, "El subtítulo tiene marcas de tiempo inválidas"
+        ) from exc
+    return {
+        "cues": [
+            {
+                "start": cue["start"],
+                "end": cue["end"],
+                "original": cue["original"][:500],
+            }
+            for cue in cues[:8]
+        ]
+    }
+
+
+@app.get("/api/projects/{pid}/audio-preview")
+def preview_audio(
+    pid: str,
+    index: int = Query(ge=0),
+    start: float = Query(default=0, ge=0, allow_inf_nan=False),
+):
+    with SessionLocal() as db:
+        project = db.get(Project, pid)
+        if not project:
+            raise HTTPException(404)
+        require_visible(db, pid)
+        if project.filename != "source.json":
+            raise HTTPException(409, "Este proyecto no tiene pistas inspeccionadas")
+        if index not in [
+            item["index"] for item in reference(pid).get("audio_tracks", [])
+        ]:
+            raise HTTPException(400, "Pista de audio no encontrada")
+    result = native_request(
+        "GET", f"/files/{pid}/audio-preview", params={"index": index, "start": start}
+    )
+    return Response(
+        content=result.content,
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.post("/api/projects/{pid}/start")
 def start_project(pid: str, body: StartRequest):
     with SessionLocal() as db:

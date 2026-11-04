@@ -180,3 +180,40 @@ def decode_audio(source, index):
     if not result.stdout:
         raise ValueError("La pista de audio está vacía")
     return result.stdout
+
+
+def audio_preview(source, index, start, duration=30):
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-ss",
+            str(start),
+            "-i",
+            str(source),
+            "-map",
+            f"0:{int(index)}",
+            "-t",
+            str(duration),
+            "-vn",
+            "-ac",
+            "2",
+            "-ar",
+            "44100",
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "96k",
+            "-f",
+            "mp3",
+            "pipe:1",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    )
+    if not result.stdout:
+        raise ValueError("No hay audio en esa posición")
+    return result.stdout

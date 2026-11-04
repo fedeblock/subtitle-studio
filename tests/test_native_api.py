@@ -252,3 +252,49 @@ def test_export_local_passes_srt_to_native_gateway(client, monkeypatch):
         f"/api/projects/{pid}/export/local", json={"language": "es", "format": "srt"}
     )
     assert result.status_code == 200 and result.json()["filename"] == "original.es.srt"
+
+
+def test_subtitle_preview_does_not_start_or_modify_project(client, monkeypatch):
+    pid = local_project()
+
+    def native(method, path, **kwargs):
+        assert path == "/files/subtitle"
+        assert kwargs["json"] == {"project_id": pid, "subtitle_id": "srt1"}
+        return SimpleNamespace(
+            json=lambda: {"srt": "1\n00:00:02,000 --> 00:00:03,000\nHello preview\n"}
+        )
+
+    monkeypatch.setattr(main, "native_request", native)
+    result = client.get(
+        f"/api/projects/{pid}/subtitle-preview", params={"subtitle_id": "srt1"}
+    )
+    assert result.status_code == 200
+    assert result.json()["cues"][0]["original"] == "Hello preview"
+    detail = client.get(f"/api/projects/{pid}").json()
+    assert detail["project"]["state"] == "draft" and detail["cues"] == []
+
+
+def test_audio_preview_passes_validated_track_and_position(client, monkeypatch):
+    pid = local_project()
+    path = Path(main.DATA) / pid / "source.json"
+    data = json.loads(path.read_text())
+    data["audio_tracks"] = [{"index": 3, "label": "Spanish"}]
+    path.write_text(json.dumps(data))
+
+    def native(method, url, **kwargs):
+        assert method == "GET" and url == f"/files/{pid}/audio-preview"
+        assert kwargs["params"] == {"index": 3, "start": 12.5}
+        return SimpleNamespace(content=b"mp3")
+
+    monkeypatch.setattr(main, "native_request", native)
+    result = client.get(f"/api/projects/{pid}/audio-preview?index=3&start=12.5")
+    assert result.status_code == 200 and result.content == b"mp3"
+    assert result.headers["content-type"] == "audio/mpeg"
+    assert (
+        client.get(f"/api/projects/{pid}/audio-preview?index=99&start=0").status_code
+        == 400
+    )
+    assert (
+        client.get(f"/api/projects/{pid}/audio-preview?index=3&start=nan").status_code
+        == 422
+    )

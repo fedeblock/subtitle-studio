@@ -301,3 +301,48 @@ def test_export_saves_next_to_original_without_overwriting(
     assert (
         existing.read_text() == "existing subtitle" and source.read_bytes() == b"video"
     )
+
+
+def test_audio_preview_uses_chosen_track_and_validates_it(
+    gateway, monkeypatch, tmp_path
+):
+    source = tmp_path / "movie.mkv"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(server, "choose_local_file", lambda: source)
+    monkeypatch.setattr(
+        server,
+        "discover_audio",
+        lambda p: [{"index": 1, "label": "English"}, {"index": 2, "label": "Spanish"}],
+    )
+    pid = str(uuid.uuid4())
+    headers = {"X-Worker-Token": server.TOKEN}
+    assert (
+        gateway.post(
+            "/files/select", json={"project_id": pid}, headers=headers
+        ).status_code
+        == 200
+    )
+    seen = []
+    monkeypatch.setattr(
+        server,
+        "audio_preview",
+        lambda path, index, start: seen.append((path, index, start)) or b"mp3-content",
+        raising=False,
+    )
+    response = gateway.get(
+        f"/files/{pid}/audio-preview?index=2&start=12.5", headers=headers
+    )
+    assert response.status_code == 200 and response.content == b"mp3-content"
+    assert seen == [(source, 2, 12.5)]
+    assert (
+        gateway.get(
+            f"/files/{pid}/audio-preview?index=99&start=0", headers=headers
+        ).status_code
+        == 400
+    )
+    assert (
+        gateway.get(
+            f"/files/{pid}/audio-preview?index=2&start=nan", headers=headers
+        ).status_code
+        == 422
+    )

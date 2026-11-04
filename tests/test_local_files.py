@@ -130,3 +130,63 @@ def test_audio_tracks_are_discovered_and_selected_without_media_copy(tmp_path):
 
     assert 400 < crosses(audio1) < 480 and 800 < crosses(audio2) < 950
     assert video.stat().st_size == before and list(tmp_path.iterdir()) == [video]
+
+
+def test_audio_preview_is_audible_and_uses_requested_track(tmp_path):
+    import subprocess
+    from array import array
+    from local_files import audio_preview, discover_audio
+
+    video = tmp_path / "sound.mkv"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=2",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:duration=2",
+            "-map",
+            "0:a",
+            "-map",
+            "1:a",
+            "-c:a",
+            "pcm_s16le",
+            str(video),
+        ],
+        check=True,
+    )
+    tracks = discover_audio(video)
+
+    def crossings(index):
+        mp3 = audio_preview(video, index, 0)
+        pcm = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-i",
+                "pipe:0",
+                "-f",
+                "s16le",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "pipe:1",
+            ],
+            input=mp3,
+            capture_output=True,
+            check=True,
+        ).stdout
+        samples = array("h", pcm)
+        return sum(a <= 0 < b for a, b in zip(samples, samples[1:]))
+
+    a, b = (crossings(t["index"]) for t in tracks)
+    assert 750 < a < 1000 and 1500 < b < 1950
+    assert list(tmp_path.iterdir()) == [video]
