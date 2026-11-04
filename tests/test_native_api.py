@@ -249,6 +249,34 @@ def test_selected_audio_must_be_from_inspected_tracks(client):
     assert client.get(f"/api/projects/{pid}").json()["project"]["state"] == "draft"
 
 
+def test_audio_stream_proxies_selected_track_without_buffering(client, monkeypatch):
+    pid = local_project()
+    path = Path(main.DATA) / pid / "source.json"
+    info = json.loads(path.read_text())
+    info["audio_tracks"] = [{"index": 2, "label": "Spanish"}]
+    path.write_text(json.dumps(info))
+    seen = []
+
+    import httpx
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, content=b"audio")
+
+    monkeypatch.setattr(
+        main,
+        "audio_client",
+        lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        raising=False,
+    )
+    r = client.get(f"/api/projects/{pid}/audio-stream?index=2&start=25")
+    assert r.status_code == 200 and r.content == b"audio"
+    assert seen[0].url.path == f"/files/{pid}/audio-stream"
+    assert seen[0].url.params["index"] == "2"
+    assert float(seen[0].url.params["start"]) == 25.0
+    assert client.get(f"/api/projects/{pid}/audio-stream?index=9").status_code == 400
+
+
 def test_export_local_passes_srt_to_native_gateway(client, monkeypatch):
     from app.core import Cue
 

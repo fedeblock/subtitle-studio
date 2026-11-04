@@ -1,6 +1,8 @@
 import uuid
 import time
 import pathlib
+import anyio
+import httpx
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request
 from fastapi.responses import (
@@ -11,7 +13,7 @@ from fastapi.responses import (
 )
 from starlette.background import BackgroundTask
 from typing import Literal
-from app.native import native_request
+from app.native import native_request, MAC_URL, TOKEN
 from app.project_sources import reference, save_workflow
 from app import improvement
 from pydantic import BaseModel, Field
@@ -59,6 +61,7 @@ def as_project(p):
             for c in info.get("subtitles", [])
         ],
         audio_tracks=info.get("audio_tracks", []),
+        audio_index=info.get("audio_index"),
         source_warnings=info.get("warnings", []),
         action=info.get("action", "translate"),
         can_undo_improvement=improvement.latest(p.id)[0] is not None,
@@ -315,6 +318,66 @@ def preview_audio(
     )
     return Response(
         content=result.content,
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def audio_client():
+    return httpx.AsyncClient(timeout=httpx.Timeout(120, connect=5))
+
+
+@app.get("/api/projects/{pid}/audio-stream")
+async def audio_stream(
+    pid: str,
+    index: int = Query(ge=0),
+    start: float = Query(default=0, ge=0, allow_inf_nan=False),
+):
+    with SessionLocal() as db:
+        p = db.get(Project, pid)
+        if not p:
+            raise HTTPException(404)
+        require_visible(db, pid)
+        if p.filename != "source.json" or index not in [
+            item["index"] for item in reference(pid).get("audio_tracks", [])
+        ]:
+            raise HTTPException(400, "Pista de audio no encontrada")
+    client = audio_client()
+    try:
+        request = client.build_request(
+            "GET",
+            MAC_URL + f"/files/{pid}/audio-stream",
+            params={"index": index, "start": start},
+            headers={"X-Worker-Token": TOKEN},
+        )
+        response = await client.send(request, stream=True)
+    except httpx.HTTPError as exc:
+        await client.aclose()
+        raise HTTPException(503, "Gateway nativo no disponible") from exc
+    if response.status_code >= 400:
+        await response.aclose()
+        await client.aclose()
+        raise HTTPException(response.status_code, "No se pudo abrir la pista de audio")
+
+    async def chunks():
+        try:
+            async for chunk in response.aiter_bytes():
+                yield chunk
+        finally:
+            with anyio.CancelScope(shield=True):
+                await response.aclose()
+                await client.aclose()
+
+    class AudioResponse(StreamingResponse):
+        async def stream_response(self, send):
+            try:
+                await super().stream_response(send)
+            finally:
+                with anyio.CancelScope(shield=True):
+                    await self.body_iterator.aclose()
+
+    return AudioResponse(
+        chunks(),
         media_type="audio/mpeg",
         headers={"Cache-Control": "no-store"},
     )

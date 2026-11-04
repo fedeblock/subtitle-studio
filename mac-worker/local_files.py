@@ -1,6 +1,8 @@
 """Read explicitly selected local media and discover associated subtitle sources."""
 
 import json
+import asyncio
+import anyio
 import subprocess
 import uuid
 from pathlib import Path
@@ -217,3 +219,57 @@ def audio_preview(source, index, start, duration=30):
     if not result.stdout:
         raise ValueError("No hay audio en esa posición")
     return result.stdout
+
+
+async def stream_audio(source, index, start):
+    """Encode a selected track on demand, without writing media to disk."""
+    process = await asyncio.create_subprocess_exec(
+        *[
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-ss",
+            str(start),
+            "-i",
+            str(source),
+            "-map",
+            f"0:{int(index)}",
+            "-vn",
+            "-ac",
+            "2",
+            "-ar",
+            "44100",
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "128k",
+            "-f",
+            "mp3",
+            "pipe:1",
+        ],
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        while chunk := await process.stdout.read(8192):
+            yield chunk
+    finally:
+        if process.returncode is None:
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
+        with anyio.CancelScope(shield=True):
+            try:
+                await asyncio.wait_for(process.stdout.read(), timeout=3)
+                await asyncio.wait_for(process.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=3)
+                except asyncio.TimeoutError:
+                    pass

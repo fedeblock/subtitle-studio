@@ -72,3 +72,9 @@ Referencias técnicas: [SQLAlchemy: conexiones y procesos bifurcados](https://do
 La vista muestra la pista seleccionada completa y la superpone al vídeo durante la reproducción en el reproductor integrado. Pulsar un segmento busca su inicio. Para una pista existente no se importa ni inicia ningún trabajo; al elegir audio se transcribe primero y se muestra el resultado en modo lectura, desde donde se puede pasar a editar o traducir. La pantalla completa nativa del vídeo puede ocultar la superposición.
 
 Validación de esta ampliación: 58 pruebas Python y 27 Node. Con la pista 2 de un borrador existente, el navegador cargó 681 segmentos y el primer segmento buscó su mark-in y se mostró sobre el vídeo; el proyecto continuó en borrador. El modo de transcripción para ver y la transición a edición se verificaron con pruebas automatizadas y el servicio nativo simulado, sin ejecutar inferencia real.
+
+## Reproductor y pistas seleccionadas
+
+La pista de audio se selecciona junto al vídeo y se reproduce desde la posición elegida mediante FFmpeg, transmitida en memoria como MP3 al navegador. El selector también determina qué pista se transcribe. Al pausar, buscar o cambiar de pista se cierra la transmisión anterior; el control Volumen junto al selector ajusta el audio elegido. No se crea otra copia del vídeo. La pista de subtítulos existente se presenta con las mismas columnas de tiempos, original y traducción que el editor; puede traducirse directamente sin ASR. Seleccionar un campo o una fila salta al mark-in. La reproducción del vídeo depende de la compatibilidad del navegador con el contenedor y sus códecs; no se ha implementado transcodificación de vídeo incompatible.
+
+Verificado con el MKV HEVC del proyecto existente: salto desde el texto, reproducción del audio seleccionado y cierre de FFmpeg al pausar. El audio físico por altavoces y otros navegadores o códecs no se han comprobado.

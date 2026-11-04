@@ -270,6 +270,7 @@ test("segments remain visible and read-only during translation and improvement",
 });
 test("draft exposes audio tracks alongside existing subtitles", () => {
   const c = editorSetup();
+  c.document.getElementById("workspace").innerHTML = "";
   evaluate(
     c,
     "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[{index:2,label:'Pista 2 · eng'},{index:3,label:'Pista 3 · spa'}],subtitle_options:[{id:'s',kind:'embedded',label:'Pista texto',supported:true}]},cues:[]};renderWorkspace();",
@@ -312,6 +313,14 @@ test("focusing a subtitle seeks to mark-in without autoplay", () => {
   assert.equal(video.currentTime, 12.5);
 });
 
+test("clicking inside a subtitle field seeks to that row", () => {
+  const c = editorSetup(), doc = c.document, row = doc.querySelector('tr.cue'), video = doc.getElementById('video');
+  row.dataset.start = '23.5';
+  video.currentTime = 0;
+  row.onclick({target: row.querySelector('.original')});
+  assert.equal(video.currentTime, 23.5);
+});
+
 test("subtitle source selection shows text and ignores slower previous response", async () => {
   const c = editorSetup(),
     a = deferred(),
@@ -344,29 +353,6 @@ test("subtitle source selection shows text and ignores slower previous response"
   );
 });
 
-test("audio preview follows selected track and chosen video position", () => {
-  const c = editorSetup();
-  evaluate(
-    c,
-    "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[{index:2,label:'English'},{index:3,label:'Spanish'}],subtitle_options:[]},cues:[]};renderWorkspace();",
-  );
-  const doc = c.document,
-    select = doc.getElementById("audio-track");
-  const options = select.querySelectorAll("option");
-  options.forEach((o) => o.removeAttribute("selected"));
-  options[1].setAttribute("selected", "");
-  doc.getElementById("video").currentTime = 95.123;
-  select.onchange();
-  assert.match(
-    doc.getElementById("audio-preview").src,
-    /index=3&start=95\.123/,
-  );
-  assert.match(
-    doc.getElementById("audio-preview-position").textContent,
-    /00:01:35\.123/,
-  );
-});
-
 test("returning to same subtitle after leaving it seeks again", () => {
   const c = editorSetup(),
     doc = c.document,
@@ -380,70 +366,6 @@ test("returning to same subtitle after leaving it seeks again", () => {
   video.currentTime = 20;
   row.onfocusin({ target: row.querySelector(".original") });
   assert.equal(video.currentTime, 7);
-});
-
-test("pausing or seeking video controls also updates playing track sample", () => {
-  const c = editorSetup();
-  evaluate(
-    c,
-    "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[{index:2,label:'English'}],subtitle_options:[]},cues:[]};renderWorkspace();",
-  );
-  const doc = c.document,
-    select = doc.getElementById("audio-track");
-  select.querySelector("option").setAttribute("selected", "");
-  const previous = doc.getElementById("audio-preview"),
-    video = doc.getElementById("video");
-  video.currentTime = 10;
-  select.onchange();
-  const audio = doc.getElementById("audio-preview");
-  assert.notEqual(audio, previous);
-  Object.defineProperty(audio, "paused", { value: false, writable: true });
-  Object.defineProperty(video, "paused", { value: false, writable: true });
-  audio.currentTime = 0;
-  audio.duration = 30;
-  audio.pause = () => {
-    audio.paused = true;
-  };
-  video.muted = false;
-  video.play = () => Promise.resolve();
-  video.pause = () => {};
-  audio.paused = false;
-  audio.onplay();
-  video.onplaying();
-  video.currentTime = 15;
-  video.onseeked();
-  assert.equal(audio.currentTime, 5);
-  video.paused = true;
-  video.onpause();
-  assert.equal(audio.paused, true);
-});
-
-test("stale video pause event cannot silence a newly playing sample", () => {
-  const c = editorSetup();
-  evaluate(
-    c,
-    "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[{index:2,label:'English'}],subtitle_options:[]},cues:[]};renderWorkspace();",
-  );
-  const doc = c.document,
-    video = doc.getElementById("video"),
-    select = doc.getElementById("audio-track");
-  select.querySelector("option").setAttribute("selected", "");
-  select.onchange();
-  const audio = doc.getElementById("audio-preview");
-  Object.defineProperty(audio, "paused", { value: false, writable: true });
-  Object.defineProperty(video, "paused", { value: false, writable: true });
-  audio.currentTime = 0;
-  audio.duration = 30;
-  audio.pause = () => {
-    audio.paused = true;
-  };
-  video.currentTime = 0;
-  video.muted = false;
-  video.play = () => Promise.resolve();
-  video.pause = () => {};
-  audio.onplay();
-  video.onpause();
-  assert.equal(audio.paused, false);
 });
 
 test("view is first and shows an entire subtitle without starting the project", async () => {
@@ -472,10 +394,49 @@ test("view is first and shows an entire subtitle without starting the project", 
     };
   };
   await source.onchange();
-  assert.equal(doc.querySelectorAll("#subtitle-preview li").length, 12);
+  assert.equal(doc.querySelectorAll("#subtitle-preview .cue").length, 12);
   await evaluate(c, "startProject('a')");
   assert.ok(calls.every(([url, opts]) => !opts || opts.method !== "POST"));
-  assert.match(doc.getElementById("subtitle-preview").textContent, /Line 11/);
+  assert.equal(doc.querySelectorAll("#subtitle-preview textarea.original")[11].value, "Line 11");
+});
+
+test("existing subtitles use the same time and text columns as the editor", async () => {
+  const c = editorSetup();
+  evaluate(c, "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[],subtitle_options:[{id:'s1',kind:'embedded',label:'1',supported:true}]},cues:[]};renderWorkspace();");
+  const source = c.document.getElementById('subtitle-source');
+  source.querySelectorAll('option').forEach(o => o.removeAttribute('selected'));
+  source.querySelector('option[value="s1"]').setAttribute('selected','');
+  c.api = async () => ({cues:[{start:2,end:3,original:'Text',translated:''}]});
+  await source.onchange();
+  assert.deepEqual([...c.document.querySelectorAll('#subtitle-preview th')].map(x => x.textContent), ['#','mark-in','mark-out','sub original (o transcripción)','traducción']);
+  assert.ok(c.document.querySelector('#subtitle-preview textarea.original').hasAttribute('readonly'));
+});
+
+test("audio track selection belongs to the video player and follows playback", () => {
+  const c = editorSetup();
+  c.document.getElementById("workspace").innerHTML = "";
+  evaluate(c, "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[{index:2,label:'Español'}],subtitle_options:[]},cues:[]};renderWorkspace();");
+  const doc = c.document;
+  assert.ok(doc.querySelector('.player-frame #audio-track'));
+  assert.ok(doc.querySelector('.player-frame #player-audio'));
+  assert.equal(doc.getElementById('audio-preview'), null);
+  const video = doc.getElementById('video'), audio = doc.getElementById('player-audio');
+  doc.querySelector('#audio-track option').setAttribute('selected', '');
+  Object.defineProperty(video, 'paused', {value:false, configurable:true});
+  audio.play = () => Promise.resolve();
+  audio.pause = () => {};
+  let cancelled = 0;
+  audio.load = () => { cancelled++; };
+  video.currentTime = 42;
+  video.onplay();
+  assert.match(audio.src, /audio-stream\?index=2&start=42\.000/);
+  video.currentTime = 85;
+  video.onseeking();
+  video.onseeked();
+  assert.match(audio.src, /index=2&start=85\.000/);
+  video.onpause();
+  assert.equal(audio.getAttribute('src'), null);
+  assert.ok(cancelled > 0);
 });
 
 test("viewing an ASR source transcribes without starting translation", async () => {
@@ -515,6 +476,13 @@ test("completed transcription in view mode is read-only and can be edited or tra
   assert.equal(doc.getElementById('video-subtitles').textContent, 'Hello');
 });
 
+test("an imported subtitle stays visible on the video in the editor", () => {
+  const c = editorSetup(), doc = c.document;
+  doc.getElementById('video').currentTime = 0.5;
+  evaluate(c, 'updateVideoSubtitles()');
+  assert.equal(doc.getElementById('video-subtitles').textContent, 'Hello');
+});
+
 test("clicking a viewed subtitle seeks the video to its mark-in", async () => {
   const c = editorSetup();
   evaluate(
@@ -530,7 +498,7 @@ test("clicking a viewed subtitle seeks the video to its mark-in", async () => {
   c.api = async () => ({ cues: [{ start: 21.5, end: 22, original: "Text" }] });
   await source.onchange();
   const target = doc.getElementById("subtitle-preview"),
-    button = target.querySelector(".preview-segment");
+    button = target.querySelector(".cue");
   doc.getElementById("video").currentTime = 0;
   target.onclick({ target: button });
   assert.equal(doc.getElementById("video").currentTime, 21.5);

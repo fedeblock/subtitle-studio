@@ -87,7 +87,7 @@ def test_extract_embedded_text_with_real_ffmpeg(tmp_path):
 def test_audio_tracks_are_discovered_and_selected_without_media_copy(tmp_path):
     import subprocess
     from array import array
-    from local_files import discover_audio, decode_audio
+    from local_files import discover_audio, decode_audio, stream_audio
 
     video = tmp_path / "two-tracks.mkv"
     subprocess.run(
@@ -129,6 +129,35 @@ def test_audio_tracks_are_discovered_and_selected_without_media_copy(tmp_path):
         return sum(a <= 0 < b for a, b in zip(samples, samples[1:]))
 
     assert 400 < crosses(audio1) < 480 and 800 < crosses(audio2) < 950
+    import asyncio
+
+    async def collect():
+        return b"".join(
+            [chunk async for chunk in stream_audio(video, tracks[1]["index"], 0)]
+        )
+
+    encoded = asyncio.run(collect())
+    pcm = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            "pipe:0",
+            "-f",
+            "s16le",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "pipe:1",
+        ],
+        input=encoded,
+        capture_output=True,
+        check=True,
+    ).stdout
+    streamed = array("h", pcm)
+    assert 800 < crosses(streamed) < 950
     assert video.stat().st_size == before and list(tmp_path.iterdir()) == [video]
 
 

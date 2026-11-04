@@ -346,3 +346,39 @@ def test_audio_preview_uses_chosen_track_and_validates_it(
         ).status_code
         == 422
     )
+
+
+def test_stream_audio_checks_track_and_streams_from_requested_time(
+    gateway, monkeypatch, tmp_path
+):
+    source = tmp_path / "movie.mkv"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(server, "choose_local_file", lambda: source)
+    monkeypatch.setattr(
+        server, "discover_audio", lambda p: [{"index": 2, "label": "Spanish"}]
+    )
+    pid = str(uuid.uuid4())
+    headers = {"X-Worker-Token": server.TOKEN}
+    assert (
+        gateway.post(
+            "/files/select", json={"project_id": pid}, headers=headers
+        ).status_code
+        == 200
+    )
+    seen = []
+    monkeypatch.setattr(
+        server,
+        "stream_audio",
+        lambda path, index, start: seen.append((path, index, start))
+        or iter([b"mp3-a", b"mp3-b"]),
+        raising=False,
+    )
+    response = gateway.get(
+        f"/files/{pid}/audio-stream?index=2&start=42.5", headers=headers
+    )
+    assert response.status_code == 200 and response.content == b"mp3-amp3-b"
+    assert seen == [(source, 2, 42.5)]
+    assert (
+        gateway.get(f"/files/{pid}/audio-stream?index=3", headers=headers).status_code
+        == 400
+    )
