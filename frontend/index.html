@@ -107,6 +107,16 @@
         padding: 16px;
         border-bottom: 1px solid #2b3850;
       }
+      .library-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        padding: 10px;
+      }
+      .library-actions button {
+        font-size: 12px;
+        padding: 7px 9px;
+      }
       .list {
         padding: 10px;
         max-height: 65vh;
@@ -347,6 +357,11 @@
       <div class="layout">
         <aside class="panel">
           <div class="heading">Biblioteca</div>
+          <div class="library-actions">
+            <button id="show-trash">Papelera</button
+            ><button id="clear-library">Vaciar biblioteca</button
+            ><button id="restore-library" hidden>Restaurar todo</button>
+          </div>
           <div class="list" id="projects">Cargando...</div>
           <div class="footer">Qwen3-ASR · MLX · Ollama</div>
         </aside>

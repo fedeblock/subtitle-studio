@@ -16,7 +16,7 @@ from app.project_sources import reference, save_workflow
 from app import improvement
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text, update
-from app.core import initialize, SessionLocal, Project, Cue, queue, DATA
+from app.core import initialize, SessionLocal, Project, Cue, HiddenProject, queue, DATA
 from app.subtitles import export, parse_srt
 
 MAX_BYTES = 2 * 1024 * 1024 * 1024
@@ -58,6 +58,7 @@ def as_project(p):
             }
             for c in info.get("subtitles", [])
         ],
+        audio_tracks=info.get("audio_tracks", []),
         source_warnings=info.get("warnings", []),
         action=info.get("action", "translate"),
         can_undo_improvement=improvement.latest(p.id)[0] is not None,
@@ -84,12 +85,93 @@ def health():
 
 
 @app.get("/api/projects")
-def projects():
+def projects(hidden: bool = False):
     with SessionLocal() as db:
-        return [
-            as_project(x)
-            for x in db.scalars(select(Project).order_by(Project.created.desc())).all()
-        ]
+        hidden_ids = select(HiddenProject.project_id)
+        statement = (
+            select(Project)
+            .where(
+                Project.id.in_(hidden_ids) if hidden else Project.id.not_in(hidden_ids)
+            )
+            .order_by(Project.created.desc())
+        )
+        return [as_project(x) for x in db.scalars(statement).all()]
+
+
+def require_local_action(request: Request):
+    if request.headers.get("X-Studio-Local") != "1":
+        raise HTTPException(403, "Acción local requerida")
+
+
+def require_visible(db, pid):
+    if db.get(HiddenProject, pid):
+        raise HTTPException(
+            409, "Restaura el proyecto de la papelera antes de procesarlo"
+        )
+
+
+ACTIVE_STATES = {"queued", "transcribing", "translating", "improve_queued", "improving"}
+
+
+@app.delete("/api/projects/{pid}")
+def hide_project(pid: str):
+    with SessionLocal() as db:
+        project = db.scalar(select(Project).where(Project.id == pid).with_for_update())
+        if not project:
+            raise HTTPException(404)
+        if project.state in ACTIVE_STATES:
+            raise HTTPException(
+                409, "Espera a que termine el procesamiento antes de quitar el proyecto"
+            )
+        if not db.get(HiddenProject, pid):
+            db.add(HiddenProject(project_id=pid))
+            db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/projects/{pid}/restore")
+def restore_project(pid: str):
+    with SessionLocal() as db:
+        hidden = db.get(HiddenProject, pid)
+        if not hidden:
+            raise HTTPException(404, "El proyecto no está en la papelera")
+        db.delete(hidden)
+        db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/library/clear")
+def clear_library(request: Request):
+    require_local_action(request)
+    with SessionLocal() as db:
+        hidden_ids = select(HiddenProject.project_id)
+        projects = db.scalars(
+            select(Project).where(Project.id.not_in(hidden_ids)).with_for_update()
+        ).all()
+        skipped = 0
+        removed = 0
+        for project in projects:
+            # The project lock can have waited for another request that hid it.
+            if db.get(HiddenProject, project.id):
+                continue
+            if project.state in ACTIVE_STATES:
+                skipped += 1
+            else:
+                db.add(HiddenProject(project_id=project.id))
+                removed += 1
+        db.commit()
+    return {"removed": removed, "active": skipped}
+
+
+@app.post("/api/library/restore")
+def restore_library(request: Request):
+    require_local_action(request)
+    with SessionLocal() as db:
+        hidden = db.scalars(select(HiddenProject)).all()
+        for entry in hidden:
+            db.delete(entry)
+        db.commit()
+    return {"restored": len(hidden)}
 
 
 def enqueue_project(pid):
@@ -185,6 +267,7 @@ def open_local(request: Request):
 class StartRequest(BaseModel):
     source: str = Field(min_length=1, max_length=64)
     action: Literal["translate", "edit"] = "translate"
+    audio_index: int | None = Field(default=None, ge=0)
 
 
 @app.post("/api/projects/{pid}/start")
@@ -193,8 +276,14 @@ def start_project(pid: str, body: StartRequest):
         p = db.get(Project, pid)
         if not p:
             raise HTTPException(404)
+        require_visible(db, pid)
         if p.state != "draft":
             raise HTTPException(409, "El proyecto ya se ha iniciado")
+    if body.source == "asr" and body.audio_index is not None:
+        if body.audio_index not in [
+            item["index"] for item in reference(pid).get("audio_tracks", [])
+        ]:
+            raise HTTPException(400, "Pista de audio no encontrada")
     cues = []
     if body.source != "asr":
         result = native_request(
@@ -212,9 +301,10 @@ def start_project(pid: str, body: StartRequest):
             raise HTTPException(422, "El subtítulo no contiene segmentos válidos")
     with SessionLocal() as db:
         p = db.scalar(select(Project).where(Project.id == pid).with_for_update())
+        require_visible(db, pid)
         if p.state != "draft":
             raise HTTPException(409, "El proyecto ya se ha iniciado")
-        save_workflow(pid, body.source, body.action)
+        save_workflow(pid, body.source, body.action, body.audio_index)
         for position, cue in enumerate(cues):
             db.add(Cue(id=str(uuid.uuid4()), project_id=pid, position=position, **cue))
         p.state = "ready" if cues and body.action == "edit" else "queued"
@@ -226,12 +316,39 @@ def start_project(pid: str, body: StartRequest):
     return {"id": pid}
 
 
+@app.post("/api/projects/{pid}/translate")
+def translate_pending(pid: str):
+    with SessionLocal() as db:
+        project = db.scalar(select(Project).where(Project.id == pid).with_for_update())
+        if not project:
+            raise HTTPException(404)
+        require_visible(db, pid)
+        if project.state not in ("ready", "failed"):
+            raise HTTPException(409, "Espera a que termine el procesamiento")
+        cues = db.scalars(select(Cue).where(Cue.project_id == pid)).all()
+        if not cues or not any(not (c.translated or "").strip() for c in cues):
+            raise HTTPException(409, "No hay segmentos pendientes de traducir")
+        if project.filename == "source.json":
+            info = reference(pid)
+            save_workflow(
+                pid,
+                info.get("selected_source", "asr"),
+                "translate",
+                info.get("audio_index"),
+            )
+        project.state, project.progress, project.error = "queued", 0, ""
+        db.commit()
+    enqueue_project(pid)
+    return {"id": pid}
+
+
 @app.post("/api/projects/{pid}/improve")
 def improve_transcript(pid: str):
     with SessionLocal() as db:
         project = db.scalar(select(Project).where(Project.id == pid).with_for_update())
         if not project:
             raise HTTPException(404)
+        require_visible(db, pid)
         if project.state not in ("ready", "failed"):
             raise HTTPException(409, "Espera a que termine el procesamiento")
         cues = db.scalars(
@@ -276,6 +393,7 @@ def undo_improvement(pid: str):
         project = db.scalar(select(Project).where(Project.id == pid).with_for_update())
         if not project:
             raise HTTPException(404)
+        require_visible(db, pid)
         if project.state not in ("ready", "failed"):
             raise HTTPException(409, "Espera a que termine el procesamiento")
         path, backup = improvement.latest(pid)
@@ -322,6 +440,7 @@ def retry_project(pid: str):
         p = db.scalar(select(Project).where(Project.id == pid).with_for_update())
         if not p:
             raise HTTPException(404)
+        require_visible(db, pid)
         if p.state != "failed":
             raise HTTPException(409, "Solo se pueden reintentar proyectos fallidos")
         path = pathlib.Path(DATA) / pid / p.filename
@@ -421,6 +540,38 @@ def update_cue(pid: str, cid: str, body: CueUpdate):
             setattr(c, field, getattr(body, field))
         db.commit()
         return as_cue(c)
+
+
+class LocalExportRequest(BaseModel):
+    language: Literal["es", "original"] = "es"
+    format: Literal["srt", "vtt"] = "srt"
+
+
+@app.post("/api/projects/{pid}/export/local")
+def export_local(pid: str, body: LocalExportRequest):
+    with SessionLocal() as db:
+        project = db.get(Project, pid)
+        if not project:
+            raise HTTPException(404)
+        if project.filename != "source.json":
+            raise HTTPException(
+                409,
+                "Este proyecto antiguo no conserva la ubicación original; usa Descargar",
+            )
+        cues = db.scalars(
+            select(Cue).where(Cue.project_id == pid).order_by(Cue.position)
+        ).all()
+        content = export(cues, body.language, body.format == "vtt")
+    return native_request(
+        "POST",
+        "/files/export",
+        json={
+            "project_id": pid,
+            "content": content,
+            "language": body.language,
+            "format": body.format,
+        },
+    ).json()
 
 
 @app.get("/api/projects/{pid}/export")

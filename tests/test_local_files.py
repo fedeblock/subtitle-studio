@@ -82,3 +82,51 @@ def test_extract_embedded_text_with_real_ffmpeg(tmp_path):
     embedded = next(x for x in items if x["kind"] == "embedded")
     text = read_subtitle(video, embedded)
     assert "Hello locally" in text and "00:00:00,000 --> 00:00:01,000" in text
+
+
+def test_audio_tracks_are_discovered_and_selected_without_media_copy(tmp_path):
+    import subprocess
+    from array import array
+    from local_files import discover_audio, decode_audio
+
+    video = tmp_path / "two-tracks.mkv"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:duration=1",
+            "-map",
+            "0:a",
+            "-map",
+            "1:a",
+            "-metadata:s:a:0",
+            "language=eng",
+            "-metadata:s:a:1",
+            "language=spa",
+            "-c:a",
+            "pcm_s16le",
+            str(video),
+        ],
+        check=True,
+    )
+    before = video.stat().st_size
+    tracks = discover_audio(video)
+    assert (
+        len(tracks) == 2 and "eng" in tracks[0]["label"] and "spa" in tracks[1]["label"]
+    )
+    audio1 = array("h", decode_audio(video, tracks[0]["index"]))
+    audio2 = array("h", decode_audio(video, tracks[1]["index"]))
+
+    def crosses(samples):
+        return sum(a <= 0 < b for a, b in zip(samples, samples[1:]))
+
+    assert 400 < crosses(audio1) < 480 and 800 < crosses(audio2) < 950
+    assert video.stat().st_size == before and list(tmp_path.iterdir()) == [video]

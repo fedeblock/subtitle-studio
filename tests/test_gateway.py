@@ -230,3 +230,74 @@ def test_translation_retries_malformed_batch_individually(gateway, monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["texts"] == ["Hola", "Mundo"]
+
+
+def test_gateway_transcribes_only_selected_validated_audio_track(
+    gateway, monkeypatch, tmp_path
+):
+    source = tmp_path / "movie.mkv"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(server, "choose_local_file", lambda: source)
+    monkeypatch.setattr(
+        server,
+        "discover_audio",
+        lambda p: [{"index": 2, "label": "English"}, {"index": 3, "label": "Español"}],
+        raising=False,
+    )
+    pid = str(uuid.uuid4())
+    headers = {"X-Worker-Token": server.TOKEN}
+    assert (
+        gateway.post(
+            "/files/select", json={"project_id": pid}, headers=headers
+        ).status_code
+        == 200
+    )
+    seen = []
+    monkeypatch.setattr(
+        server.app.state.asr,
+        "transcribe",
+        lambda path, audio_index=None: seen.append((path, audio_index))
+        or {"srt": "ok"},
+    )
+    assert (
+        gateway.post(
+            "/transcribe", json={"project_id": pid, "audio_index": 3}, headers=headers
+        ).status_code
+        == 200
+    )
+    assert seen == [(source, 3)]
+    assert (
+        gateway.post(
+            "/transcribe", json={"project_id": pid, "audio_index": 99}, headers=headers
+        ).status_code
+        == 400
+    )
+
+
+def test_export_saves_next_to_original_without_overwriting(
+    gateway, monkeypatch, tmp_path
+):
+    source = tmp_path / "Movie.mkv"
+    source.write_bytes(b"video")
+    existing = tmp_path / "Movie.es.srt"
+    existing.write_text("existing subtitle")
+    monkeypatch.setattr(server, "choose_local_file", lambda: source)
+    pid = str(uuid.uuid4())
+    headers = {"X-Worker-Token": server.TOKEN}
+    gateway.post("/files/select", json={"project_id": pid}, headers=headers)
+    result = gateway.post(
+        "/files/export",
+        headers=headers,
+        json={
+            "project_id": pid,
+            "content": "1\n00:00:00,000 --> 00:00:01,000\nHola\n",
+            "language": "es",
+            "format": "srt",
+        },
+    )
+    assert result.status_code == 200
+    assert result.json()["filename"] == "Movie.es (1).srt"
+    assert (tmp_path / result.json()["filename"]).read_text().endswith("Hola\n")
+    assert (
+        existing.read_text() == "existing subtitle" and source.read_bytes() == b"video"
+    )

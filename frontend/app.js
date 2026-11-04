@@ -7,7 +7,8 @@ let projects = [],
   selectionRevision = 0,
   editRevision = 0,
   cueEditor = null,
-  editorProject = null;
+  editorProject = null,
+  viewingTrash = false;
 const $ = (x) => document.getElementById(x),
   esc = (s) =>
     String(s ?? "").replace(
@@ -49,7 +50,7 @@ async function refresh() {
   if (refreshing) return;
   refreshing = true;
   try {
-    projects = await api("/api/projects");
+    projects = await api(`/api/projects${viewingTrash ? "?hidden=true" : ""}`);
     renderList();
     if (selected && !busy && !pendingEdits() && dirty.size === 0) {
       const pid = selected,
@@ -84,7 +85,11 @@ function renderList() {
             `<button class="project ${selected === p.id ? "active" : ""}" data-id="${p.id}"><div class="name">${esc(p.name)}</div><small>${esc(stateName(p))}</small><div class="progress"><span style="width:${p.progress}%"></span></div></button>`,
         )
         .join("")
-    : '<div class="empty">Aún no hay proyectos.</div>';
+    : `<div class="empty">${viewingTrash ? "Papelera vacía." : "Aún no hay proyectos."}</div>`;
+  if ($("show-trash"))
+    $("show-trash").textContent = viewingTrash ? "Ver biblioteca" : "Papelera";
+  if ($("clear-library")) $("clear-library").hidden = viewingTrash;
+  if ($("restore-library")) $("restore-library").hidden = !viewingTrash;
   document
     .querySelectorAll(".project")
     .forEach((b) => (b.onclick = () => select(b.dataset.id)));
@@ -138,7 +143,10 @@ function renderWorkspace() {
   if (!detail) return;
   let p = detail.project,
     cues = detail.cues;
-  const ready = ["ready", "failed"].includes(p.state) && cues.length > 0;
+  const ready =
+    !viewingTrash && ["ready", "failed"].includes(p.state) && cues.length > 0;
+  const showReadOnly = !ready && p.state !== "draft" && cues.length > 0;
+  const oldScroll = $("editor")?.scrollTop || 0;
   const workspace = $("workspace");
   if (workspace.dataset.projectId !== p.id || !$("video")) {
     workspace.innerHTML = `<div id="project-header"></div><video id="video" class="player" controls preload="metadata" src="/api/projects/${p.id}/media"></video><div id="media-error" class="notice error" hidden></div><div id="project-content"></div>`;
@@ -151,7 +159,7 @@ function renderWorkspace() {
     };
   }
   $("project-header").innerHTML =
-    `<div class="top"><div><h2>${esc(p.name)}</h2><span class="status ${esc(p.state)}">Estado: ${esc(stateName(p))}</span></div>${ready ? '<div class="group"><select id="language"><option value="es">Español</option><option value="original">Original</option></select><select id="format"><option>srt</option><option>vtt</option></select><button id="export" class="primary">Exportar</button></div>' : ""}</div>${p.error ? `<div class="notice error">${esc(p.error)} ${p.state === "failed" ? '<button id="retry">Reintentar pendientes</button>' : ""}</div>` : ""}`;
+    `<div class="top"><div><h2>${esc(p.name)}</h2><span class="status ${esc(p.state)}">Estado: ${esc(stateName(p))}</span></div>${ready ? '<div class="group"><select id="language"><option value="es">Español</option><option value="original">Original</option></select><select id="format"><option>srt</option><option>vtt</option></select><button id="export" class="primary">Guardar junto al vídeo</button><button id="download">Descargar</button></div>' : ""}<button id="project-remove">${viewingTrash ? "Restaurar" : "Quitar de biblioteca"}</button></div>${p.error ? `<div class="notice error">${esc(p.error)} ${p.state === "failed" && !viewingTrash ? '<button id="retry">Reintentar pendientes</button>' : ""}</div>` : ""}`;
   if (!ready) {
     cueEditor = null;
     editorProject = null;
@@ -179,15 +187,39 @@ function renderWorkspace() {
   if (ready && cueEditor && !dirty.size && !pendingEdits())
     cueEditor.reconcile(cues);
   $("project-content").innerHTML =
-    `<div class="controls"><span class="muted">${cues.length} segmentos · ${p.source_kind === "reference" ? "Archivo original, sin copia" : "Copia local existente"}</span></div>${ready ? editorMarkup(cues, p) : p.state === "draft" ? sourceChoices(p) : '<div class="notice">Puedes previsualizar el original mientras se procesa. Durante la transcripción no hay un porcentaje de avance disponible; la primera ejecución puede necesitar descargar modelos.</div>'}`;
+    `<div class="controls"><span class="muted">${cues.length} segmentos · ${p.source_kind === "reference" ? "Archivo original, sin copia" : "Copia local existente"}</span></div>${ready ? editorMarkup(cues, p) : showReadOnly ? editorMarkup(cues, p, true) : p.state === "draft" ? (viewingTrash ? '<div class="notice">Restaura el proyecto para procesarlo.</div>' : sourceChoices(p)) : '<div class="notice">Puedes previsualizar el original mientras se procesa. Durante la transcripción no hay un porcentaje de avance disponible; la primera ejecución puede necesitar descargar modelos.</div>'}`;
+  if ($("editor")) $("editor").scrollTop = oldScroll;
+  if ($("project-remove"))
+    $("project-remove").onclick = () => removeProject(p.id);
   if ($("start-project")) $("start-project").onclick = () => startProject(p.id);
   if ($("retry")) $("retry").onclick = () => retryProject(p.id);
   if (ready) {
     if (p.action === "edit") $("language").value = "original";
     $("export").onclick = async () => {
       if (busy || !(await settleEdits())) return;
+      busy = true;
+      try {
+        const saved = await api(`/api/projects/${p.id}/export/local`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            language: $("language").value,
+            format: $("format").value,
+          }),
+        });
+        alert(`Subtítulos guardados en: ${saved.path}`);
+      } catch (error) {
+        alert(`${error.message} Puedes usar Descargar.`);
+      } finally {
+        busy = false;
+      }
+    };
+    $("download").onclick = async () => {
+      if (busy || !(await settleEdits())) return;
       location.href = `/api/projects/${p.id}/export?language=${$("language").value}&format=${$("format").value}`;
     };
+    if ($("translate-pending"))
+      $("translate-pending").onclick = () => translatePending(p.id);
     document.querySelectorAll(".cue[data-cue]").forEach((row) => {
       row.querySelectorAll("input,textarea").forEach((el) => {
         el.oninput = () => {
@@ -240,11 +272,14 @@ async function retryProject(pid) {
 function pendingEdits() {
   return !!cueEditor?.pending.length;
 }
-function editorMarkup(cues, project) {
-  return `<div class="editor-toolbar"><div class="group"><button id="undo-edit" title="Deshacer (⌘Z / Ctrl+Z)">↶ Deshacer</button><button id="redo-edit" title="Rehacer (⌘⇧Z / Ctrl+Shift+Z)">↷ Rehacer</button><button id="retry-save" hidden>Reintentar guardado</button><button id="improve-text" title="Corregir puntuación y mayúsculas con Ollama">Mejorar transcripción</button>${project.can_undo_improvement ? '<button id="undo-improvement">Revertir última mejora</button>' : ""}</div><span id="save-status" role="status" aria-live="polite"></span></div><p class="tiny">Guardado automático al salir de cada campo · Deshacer disponible durante esta sesión del proyecto.</p><div class="editor" id="editor"><table class="subtitle-table"><colgroup><col class="number-col"><col class="time-col"><col class="time-col"><col><col></colgroup><thead><tr><th scope="col">#</th><th scope="col">mark-in</th><th scope="col">mark-out</th><th scope="col">sub original (o transcripción)</th><th scope="col">traducción</th></tr></thead><tbody>${cues
+function editorMarkup(cues, project, readOnly = false) {
+  const toolbar = readOnly
+    ? '<div class="notice">Segmentos visibles en modo lectura mientras se procesa; la edición se reactivará al terminar.</div>'
+    : `<div class="editor-toolbar"><div class="group"><button id="undo-edit" title="Deshacer (⌘Z / Ctrl+Z)">↶ Deshacer</button><button id="redo-edit" title="Rehacer (⌘⇧Z / Ctrl+Shift+Z)">↷ Rehacer</button><button id="retry-save" hidden>Reintentar guardado</button><button id="improve-text" title="Corregir puntuación y mayúsculas con Ollama">Mejorar transcripción</button>${cues.some((c) => !(c.translated || "").trim()) ? '<button id="translate-pending">Traducir pendientes</button>' : ""}${project.can_undo_improvement ? '<button id="undo-improvement">Revertir última mejora</button>' : ""}</div><span id="save-status" role="status" aria-live="polite"></span></div><p class="tiny">Guardado automático al salir de cada campo · Deshacer disponible durante esta sesión del proyecto.</p>`;
+  return `${toolbar}<div class="editor" id="editor"><table class="subtitle-table"><colgroup><col class="number-col"><col class="time-col"><col class="time-col"><col><col></colgroup><thead><tr><th scope="col">#</th><th scope="col">mark-in</th><th scope="col">mark-out</th><th scope="col">sub original (o transcripción)</th><th scope="col">traducción</th></tr></thead><tbody>${cues
     .map((item, i) => {
-      const c = cueEditor.get(item.id) || item;
-      return `<tr class="cue" data-cue="${c.id}" data-start="${c.start}" data-end="${c.end}"><td class="cue-number">${i + 1}</td><td><input aria-label="Mark-in ${i + 1}" class="start" data-field="start" value="${time(c.start)}"></td><td><input aria-label="Mark-out ${i + 1}" class="end" data-field="end" value="${time(c.end)}"></td><td><textarea class="original" data-field="original" aria-label="Original ${i + 1}">${esc(c.original)}</textarea></td><td><textarea class="translated" data-field="translated" aria-label="Traducción ${i + 1}">${esc(c.translated)}</textarea></td></tr>`;
+      const c = cueEditor?.get(item.id) || item;
+      return `<tr class="cue" data-cue="${c.id}" data-start="${c.start}" data-end="${c.end}"><td class="cue-number">${i + 1}</td><td><input aria-label="Mark-in ${i + 1}" class="start" data-field="start" ${readOnly ? "readonly" : ""} value="${time(c.start)}"></td><td><input aria-label="Mark-out ${i + 1}" class="end" data-field="end" ${readOnly ? "readonly" : ""} value="${time(c.end)}"></td><td><textarea class="original" data-field="original" ${readOnly ? "readonly" : ""} aria-label="Original ${i + 1}">${esc(c.original)}</textarea></td><td><textarea class="translated" data-field="translated" ${readOnly ? "readonly" : ""} aria-label="Traducción ${i + 1}">${esc(c.translated)}</textarea></td></tr>`;
     })
     .join("")}</tbody></table></div>`;
 }
@@ -394,8 +429,9 @@ async function undoImprovement(pid) {
   }
 }
 function sourceChoices(p) {
-  const options = p.subtitle_options || [];
-  return `<div class="notice"><h2>¿Qué subtítulos quieres usar?</h2><p>El vídeo se lee desde su ubicación original. No se copia ni se envía a Internet.</p><label>Fuente <select id="subtitle-source"><option value="" selected disabled>Elige una fuente</option><option value="asr">Generar desde el audio con ASR</option>${options.map((o) => `<option value="${esc(o.id)}" ${o.supported ? "" : "disabled"}>${esc(o.label)} · ${o.kind === "embedded" ? "incrustado" : "archivo"}${o.supported ? "" : " · requiere OCR/conversión"}</option>`).join("")}</select></label><label> Acción <select id="subtitle-action"><option value="translate">Traducir al español</option><option value="edit">Solo editar / corregir</option></select></label><button id="start-project" class="primary">Continuar</button>${options.length ? "" : "<p>No se encontraron archivos de subtítulos ni pistas incrustadas.</p>"}${(p.source_warnings || []).map((w) => `<p>${esc(w)}</p>`).join("")}</div>`;
+  const options = p.subtitle_options || [],
+    tracks = p.audio_tracks || [];
+  return `<div class="notice"><h2>¿Qué subtítulos quieres usar?</h2><p>El vídeo se lee desde su ubicación original. No se copia ni se envía a Internet.</p><label>Fuente <select id="subtitle-source"><option value="" selected disabled>Elige una fuente</option><option value="asr">Generar desde el audio con ASR</option>${options.map((o) => `<option value="${esc(o.id)}" ${o.supported ? "" : "disabled"}>${esc(o.label)} · ${o.kind === "embedded" ? "incrustado" : "archivo"}${o.supported ? "" : " · requiere OCR/conversión"}</option>`).join("")}</select></label>${tracks.length ? `<label> Pista de audio para transcribir <select id="audio-track">${tracks.map((t) => `<option value="${t.index}">${esc(t.label)}</option>`).join("")}</select></label>` : ""}<label> Acción <select id="subtitle-action"><option value="translate">Traducir al español directamente</option><option value="edit">Revisar y mejorar antes de traducir</option></select></label><button id="start-project" class="primary">Continuar</button>${options.length ? "" : "<p>No se encontraron archivos de subtítulos ni pistas incrustadas.</p>"}${(p.source_warnings || []).map((w) => `<p>${esc(w)}</p>`).join("")}</div>`;
 }
 async function startProject(pid) {
   if (busy) return;
@@ -410,7 +446,14 @@ async function startProject(pid) {
     await api(`/api/projects/${pid}/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source, action: $("subtitle-action").value }),
+      body: JSON.stringify({
+        source,
+        action: $("subtitle-action").value,
+        audio_index:
+          source === "asr" && $("audio-track")
+            ? Number($("audio-track").value)
+            : null,
+      }),
     });
     // Refresh the existing project without replacing its video element.
     detail = await api(`/api/projects/${pid}`);
@@ -422,6 +465,92 @@ async function startProject(pid) {
     busy = false;
   }
 }
+async function translatePending(pid) {
+  if (busy || !(await settleEdits())) return;
+  busy = true;
+  try {
+    await api(`/api/projects/${pid}/translate`, { method: "POST" });
+    cueEditor = null;
+    editorProject = null;
+    busy = false;
+    await select(pid);
+    await refresh();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    busy = false;
+  }
+}
+async function resetWorkspace() {
+  if (busy || !(await settleEdits())) return false;
+  selected = null;
+  detail = null;
+  cueEditor = null;
+  editorProject = null;
+  selectionRevision++;
+  $("workspace").innerHTML = '<div class="empty">Selecciona un proyecto.</div>';
+  return true;
+}
+async function removeProject(pid) {
+  if (busy || !(await settleEdits())) return;
+  const restoring = viewingTrash;
+  if (
+    !restoring &&
+    !confirm(
+      "¿Quitar este proyecto de la biblioteca? Podrás restaurarlo desde la papelera. No se borrarán los archivos.",
+    )
+  )
+    return;
+  try {
+    await api(`/api/projects/${pid}${restoring ? "/restore" : ""}`, {
+      method: restoring ? "POST" : "DELETE",
+    });
+    await resetWorkspace();
+    await refresh();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+async function toggleTrash() {
+  if (!(await resetWorkspace())) return;
+  viewingTrash = !viewingTrash;
+  await refresh();
+}
+async function clearLibrary() {
+  if (busy || !(await settleEdits())) return;
+  if (
+    !confirm(
+      "¿Quitar los proyectos de la biblioteca? Los archivos se conservan y los proyectos se podrán restaurar desde la papelera. Los trabajos activos permanecerán visibles.",
+    )
+  )
+    return;
+  try {
+    const result = await api("/api/library/clear", {
+      method: "POST",
+      headers: { "X-Studio-Local": "1" },
+    });
+    await resetWorkspace();
+    await refresh();
+    if (result.active)
+      alert(`${result.active} proyecto(s) siguen activos y no se quitaron.`);
+  } catch (error) {
+    alert(error.message);
+  }
+}
+async function restoreLibrary() {
+  if (busy || !(await settleEdits())) return;
+  try {
+    await api("/api/library/restore", {
+      method: "POST",
+      headers: { "X-Studio-Local": "1" },
+    });
+    await resetWorkspace();
+    await refresh();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 async function openLocalFile() {
   const button = $("open-local");
   if (button.disabled) return;
@@ -450,5 +579,8 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 $("open-local").onclick = openLocalFile;
+$("show-trash").onclick = toggleTrash;
+$("clear-library").onclick = clearLibrary;
+$("restore-library").onclick = restoreLibrary;
 refresh();
 setInterval(refresh, 4000);

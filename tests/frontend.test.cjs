@@ -254,3 +254,39 @@ test("new server data replaces an idle editor snapshot", () => {
     "Server correction",
   );
 });
+
+test("segments remain visible and read-only during translation and improvement", () => {
+  const c = editorSetup(),
+    doc = c.document;
+  for (const state of ["translating", "improving"]) {
+    evaluate(
+      c,
+      `detail.project.state=${JSON.stringify(state)};renderWorkspace();`,
+    );
+    assert.equal(doc.querySelector(".original").value, "Hello");
+    assert.ok(doc.querySelector(".original").hasAttribute("readonly"));
+    assert.ok(doc.querySelector(".start").hasAttribute("readonly"));
+  }
+});
+test("draft exposes audio tracks alongside existing subtitles", () => {
+  const c = editorSetup();
+  evaluate(
+    c,
+    "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[{index:2,label:'Pista 2 · eng'},{index:3,label:'Pista 3 · spa'}],subtitle_options:[{id:'s',kind:'embedded',label:'Pista texto',supported:true}]},cues:[]};renderWorkspace();",
+  );
+  assert.equal(c.document.querySelectorAll("#audio-track option").length, 2);
+  assert.ok(c.document.querySelector('#subtitle-source option[value="s"]'));
+});
+
+test("draft in trash must be restored before it can start", () => {
+  const c = editorSetup();
+  evaluate(
+    c,
+    "viewingTrash=true;detail={project:{id:'a',name:'test',state:'draft',subtitle_options:[]},cues:[]};renderWorkspace();",
+  );
+  assert.equal(c.document.querySelector("#start-project"), null);
+  assert.match(
+    c.document.getElementById("project-content").textContent,
+    /Restaura/,
+  );
+});

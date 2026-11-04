@@ -18,14 +18,16 @@ class ASRRuntime:
         self.session = None
         self.last_used = None
 
-    def transcribe(self, path):
-        return self.executor.submit(self._transcribe, path).result()
+    def transcribe(self, path, audio_index=None):
+        return self.executor.submit(self._transcribe, path, audio_index).result()
 
-    def _transcribe(self, path):
+    def _transcribe(self, path, audio_index=None):
         try:
             if self.session is None:
                 self.session = self.factory()
-            return self.session.transcribe(path)
+            if audio_index is None:
+                return self.session.transcribe(path)
+            return self.session.transcribe(path, audio_index=audio_index)
         finally:
             # Count inactivity from completion, including failures.
             self.last_used = self.clock()
@@ -97,9 +99,16 @@ class MLXSession:
         self.asr = Session(model=model)
         self.aligner = ForcedAligner(model_path=aligner_model)
 
-    def transcribe(self, path):
+    def transcribe(self, path, audio_index=None):
+        audio = str(path)
+        if audio_index is not None:
+            import numpy as np
+            from local_files import decode_audio
+
+            pcm = decode_audio(path, audio_index)
+            audio = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
         result = self.asr.transcribe(
-            str(path), return_timestamps=True, forced_aligner=self.aligner
+            audio, return_timestamps=True, forced_aligner=self.aligner
         )
         # Upstream timestamps are words; preserve the CLI's sentence grouping.
         from dataclasses import replace

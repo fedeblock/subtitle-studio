@@ -59,7 +59,11 @@ def process_project(pid):
             ).all()
             cues = [{"original": c.original} for c in existing]
         if not cues:
-            result = mac_post("/transcribe", {"project_id": pid})
+            request = {"project_id": pid}
+            audio_index = reference(pid).get("audio_index")
+            if audio_index is not None:
+                request["audio_index"] = audio_index
+            result = mac_post("/transcribe", request)
             cues = parse_srt(result["srt"])
             if not cues:
                 raise ValueError("No se detectaron subtítulos válidos")

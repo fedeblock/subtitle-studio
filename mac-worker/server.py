@@ -10,10 +10,12 @@ from model_runtime import ASRRuntime, MLXSession, clear_metal
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, FileResponse, Response
 from uuid import UUID
+from typing import Literal
 from threading import Lock
 from local_files import (
     choose_local_file,
     discover_subtitles,
+    discover_audio,
     read_subtitle,
     MEDIA_EXTENSIONS,
 )
@@ -80,6 +82,10 @@ class TranscribeRequest(BaseModel):
     )
 
 
+class AudioTranscribeRequest(TranscribeRequest):
+    audio_index: int | None = Field(default=None, ge=0)
+
+
 def project_folder(pid):
     try:
         pid = str(UUID(str(pid)))
@@ -139,6 +145,10 @@ def select_file(req: TranscribeRequest):
         if folder.exists():
             raise HTTPException(409, "El proyecto ya existe")
         candidates, warnings = discover_subtitles(source)
+        try:
+            audio_tracks = discover_audio(source)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            audio_tracks = []
         folder.mkdir(parents=True)
         with (folder / "source.json").open("x") as output:
             json.dump(
@@ -146,6 +156,7 @@ def select_file(req: TranscribeRequest):
                     "version": 1,
                     "path": str(source),
                     "subtitles": candidates,
+                    "audio_tracks": audio_tracks,
                     "warnings": warnings,
                 },
                 output,
@@ -191,11 +202,51 @@ def import_subtitle(req: SubtitleRequest):
         raise HTTPException(409, str(exc)) from exc
 
 
-@app.post("/transcribe")
-def transcribe(req: TranscribeRequest):
+class ExportRequest(TranscribeRequest):
+    content: str = Field(max_length=20 * 1024 * 1024)
+    language: Literal["es", "original"]
+    format: Literal["srt", "vtt"]
+
+
+@app.post("/files/export")
+def export_next_to_source(req: ExportRequest):
     source = resolve_source(req.project_id)
+    if not (project_folder(req.project_id) / "source.json").is_file():
+        raise HTTPException(
+            409,
+            "Este proyecto antiguo no conserva la ubicación del vídeo original; usa Descargar",
+        )
+    base = f"{source.stem}.{req.language}"
     try:
-        return app.state.asr.transcribe(source)
+        for index in range(10000):
+            suffix = f" ({index})" if index else ""
+            dest = source.parent / f"{base}{suffix}.{req.format}"
+            try:
+                with dest.open("x", encoding="utf-8", newline="") as output:
+                    output.write(req.content)
+                return {"filename": dest.name, "path": str(dest)}
+            except FileExistsError:
+                continue
+        raise HTTPException(409, "No hay un nombre de exportación disponible")
+    except OSError as exc:
+        raise HTTPException(
+            409, f"No se pudo guardar junto al vídeo: {exc.strerror or exc}"
+        ) from exc
+
+
+@app.post("/transcribe")
+def transcribe(req: AudioTranscribeRequest):
+    source = resolve_source(req.project_id)
+    if req.audio_index is not None:
+        reference = load_reference(project_folder(req.project_id))
+        if req.audio_index not in [
+            item["index"] for item in reference.get("audio_tracks", [])
+        ]:
+            raise HTTPException(400, "Pista de audio no autorizada o inexistente")
+    try:
+        if req.audio_index is None:
+            return app.state.asr.transcribe(source)
+        return app.state.asr.transcribe(source, audio_index=req.audio_index)
     except Exception as exc:
         raise HTTPException(502, f"Transcription error: {str(exc)[-2000:]}") from exc
 

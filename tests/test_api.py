@@ -148,3 +148,69 @@ def test_stale_editor_does_not_overwrite_other_changes(client, queued):
         client.get(f"/api/projects/{pid}").json()["cues"][0]["original"]
         == "New original"
     )
+
+
+def test_trash_and_restore_keep_project_data_and_original(client, queued):
+    pid = upload(client).json()["id"]
+    with SessionLocal() as db:
+        db.get(Project, pid).state = "ready"
+        db.add(
+            Cue(
+                id="trash-cue",
+                project_id=pid,
+                position=0,
+                start=0,
+                end=1,
+                original="Hello",
+                translated="Hola",
+            )
+        )
+        db.commit()
+    path = Path(main.DATA) / pid / "source.wav"
+    assert client.delete(f"/api/projects/{pid}").status_code == 200
+    assert client.get("/api/projects").json() == []
+    assert path.read_bytes() == b"audio"
+    assert client.get(f"/api/projects/{pid}").json()["cues"][0]["original"] == "Hello"
+    assert client.post(f"/api/projects/{pid}/restore").status_code == 200
+    assert client.get("/api/projects").json()[0]["id"] == pid
+
+
+def test_running_project_cannot_be_removed(client, queued):
+    pid = upload(client).json()["id"]
+    assert client.delete(f"/api/projects/{pid}").status_code == 409
+    assert client.get("/api/projects").json()[0]["id"] == pid
+
+
+def test_library_bulk_mutation_requires_same_origin_header(client, queued):
+    assert client.post("/api/library/clear").status_code == 403
+    assert client.post("/api/library/restore").status_code == 403
+    assert (
+        client.post("/api/library/clear", headers={"X-Studio-Local": "1"}).status_code
+        == 200
+    )
+    assert (
+        client.post("/api/library/restore", headers={"X-Studio-Local": "1"}).status_code
+        == 200
+    )
+
+
+def test_hidden_project_cannot_be_requeued(client, queued):
+    pid = upload(client).json()["id"]
+    with SessionLocal() as db:
+        db.get(Project, pid).state = "failed"
+        db.add(
+            Cue(
+                id="hidden-cue",
+                project_id=pid,
+                position=0,
+                start=0,
+                end=1,
+                original="Hello",
+                translated="",
+            )
+        )
+        db.commit()
+    assert client.delete(f"/api/projects/{pid}").status_code == 200
+    assert client.post(f"/api/projects/{pid}/retry").status_code == 409
+    assert client.post(f"/api/projects/{pid}/translate").status_code == 409
+    assert client.post(f"/api/projects/{pid}/improve").status_code == 409

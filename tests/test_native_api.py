@@ -134,3 +134,121 @@ def test_invalid_import_leaves_draft_recoverable(client, monkeypatch):
     assert response.status_code == 422
     detail = client.get(f"/api/projects/{pid}").json()
     assert detail["project"]["state"] == "draft" and not detail["cues"]
+
+
+def test_translate_after_edit_preserves_cues_and_enqueues(client, monkeypatch):
+    pid = local_project()
+    with SessionLocal() as db:
+        p = db.get(Project, pid)
+        p.state = "ready"
+        from app.core import Cue
+
+        db.add(
+            Cue(
+                id="reviewed",
+                project_id=pid,
+                position=0,
+                start=2,
+                end=4,
+                original="Corrected text.",
+                translated="",
+            )
+        )
+        db.commit()
+    from app.project_sources import save_workflow, reference
+
+    save_workflow(pid, "srt1", "edit")
+    jobs = []
+    monkeypatch.setattr(
+        main, "queue", lambda: SimpleNamespace(enqueue=lambda *a, **kw: jobs.append(a))
+    )
+    assert client.post(f"/api/projects/{pid}/translate").status_code == 200
+    detail = client.get(f"/api/projects/{pid}").json()
+    assert (
+        detail["project"]["state"] == "queued"
+        and detail["cues"][0]["original"] == "Corrected text."
+    )
+    assert reference(pid)["action"] == "translate" and len(jobs) == 1
+
+
+def test_selected_audio_is_saved_and_sent_to_worker(client, monkeypatch):
+    import json
+    from app.project_sources import reference
+    from app import worker
+
+    pid = local_project()
+    path = Path(main.DATA) / pid / "source.json"
+    info = json.loads(path.read_text())
+    info["audio_tracks"] = [
+        {"index": 2, "label": "English"},
+        {"index": 3, "label": "Español"},
+    ]
+    path.write_text(json.dumps(info))
+    jobs = []
+    monkeypatch.setattr(
+        main, "queue", lambda: SimpleNamespace(enqueue=lambda *a, **k: jobs.append(a))
+    )
+    assert (
+        client.post(
+            f"/api/projects/{pid}/start",
+            json={"source": "asr", "action": "edit", "audio_index": 3},
+        ).status_code
+        == 200
+    )
+    assert reference(pid)["audio_index"] == 3
+    seen = []
+
+    def native(path, json, **kwargs):
+        seen.append((path, json))
+        return {"srt": "1\n00:00:00,000 --> 00:00:01,000\nHello\n"}
+
+    monkeypatch.setattr(worker, "mac_post", native)
+    worker.process_project(pid)
+    assert seen == [("/transcribe", {"project_id": pid, "audio_index": 3})]
+
+
+def test_selected_audio_must_be_from_inspected_tracks(client):
+    pid = local_project()
+    response = client.post(
+        f"/api/projects/{pid}/start",
+        json={"source": "asr", "action": "edit", "audio_index": 123},
+    )
+    assert response.status_code == 400
+    assert client.get(f"/api/projects/{pid}").json()["project"]["state"] == "draft"
+
+
+def test_export_local_passes_srt_to_native_gateway(client, monkeypatch):
+    from app.core import Cue
+
+    pid = local_project()
+    with SessionLocal() as db:
+        db.get(Project, pid).state = "ready"
+        db.add(
+            Cue(
+                id="export-cue",
+                project_id=pid,
+                position=0,
+                start=1,
+                end=2,
+                original="Hello",
+                translated="Hola",
+            )
+        )
+        db.commit()
+
+    def native(method, path, **kwargs):
+        assert path == "/files/export"
+        assert kwargs["json"]["project_id"] == pid
+        assert "Hola" in kwargs["json"]["content"]
+        return SimpleNamespace(
+            json=lambda: {
+                "path": "/selected/original.es.srt",
+                "filename": "original.es.srt",
+            }
+        )
+
+    monkeypatch.setattr(main, "native_request", native)
+    result = client.post(
+        f"/api/projects/{pid}/export/local", json={"language": "es", "format": "srt"}
+    )
+    assert result.status_code == 200 and result.json()["filename"] == "original.es.srt"

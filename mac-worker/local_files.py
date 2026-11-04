@@ -136,3 +136,47 @@ def read_subtitle(source, candidate):
     if len(result.stdout) > 20 * 1024 * 1024:
         raise ValueError("Subtítulo demasiado grande")
     return result.stdout.decode("utf-8-sig")
+
+
+def discover_audio(source, probe=probe_media):
+    streams = probe(source).get("streams", [])
+    tracks = []
+    for stream in streams:
+        if stream.get("codec_type") != "audio":
+            continue
+        tags = stream.get("tags", {})
+        index = int(stream["index"])
+        tracks.append(
+            {
+                "index": index,
+                "label": f"Pista {index} · {tags.get('language', 'sin idioma')} · {tags.get('title', stream.get('codec_name', 'audio'))}",
+            }
+        )
+    return tracks
+
+
+def decode_audio(source, index):
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-i",
+            str(source),
+            "-map",
+            f"0:{int(index)}",
+            "-f",
+            "s16le",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "pipe:1",
+        ],
+        capture_output=True,
+        check=True,
+    )
+    if not result.stdout:
+        raise ValueError("La pista de audio está vacía")
+    return result.stdout
