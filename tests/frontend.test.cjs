@@ -25,6 +25,7 @@ function setup() {
       json: async () => [],
     }),
   });
+  vm.runInContext(fs.readFileSync("frontend/editor-state.js", "utf8"), ctx);
   vm.runInContext(
     source.replace(/refresh\(\);\s*setInterval\(refresh,\s*4000\);/, ""),
     ctx,
@@ -147,9 +148,109 @@ test("draft source choices retain selection during unchanged polling", async () 
   evaluate(c, "selected='a';detail=data;renderWorkspace();");
   const choices = c.document.getElementById("subtitle-source");
   assert.ok(choices.textContent.includes("Subs/English.srt"));
-  assert.ok(choices.querySelector('option[value="pgs"]').hasAttribute('disabled'));
+  assert.ok(
+    choices.querySelector('option[value="pgs"]').hasAttribute("disabled"),
+  );
   c.api = async (url) =>
     url === "/api/projects" ? [] : JSON.parse(JSON.stringify(data));
   await evaluate(c, "refresh()");
   assert.ok(c.document.getElementById("subtitle-source") === choices);
+});
+
+function editorSetup() {
+  const { parseHTML } = require("linkedom");
+  const c = setup();
+  c.document = parseHTML(
+    fs.readFileSync("frontend/index.html", "utf8"),
+  ).document;
+  const source = fs.readFileSync("frontend/app.js", "utf8");
+  evaluate(
+    c,
+    source.slice(
+      source.indexOf("function renderWorkspace()"),
+      source.indexOf("async function retryProject("),
+    ),
+  );
+  evaluate(
+    c,
+    "selected='a';detail={project:{id:'a',name:'test',state:'ready',progress:100},cues:[{id:'c1',position:0,start:0,end:2,original:'Hello',translated:''}]};renderWorkspace();",
+  );
+  return c;
+}
+test("editor has five columns and saves on blur; undo restores saved value", async () => {
+  const c = editorSetup(),
+    doc = c.document;
+  assert.equal(doc.querySelectorAll("th").length, 5);
+  assert.equal(doc.querySelector(".savebtn"), null);
+  const saved = [];
+  c.api = async (url, opts) => {
+    const value = JSON.parse(opts.body);
+    saved.push(value);
+    return { id: "c1", position: 0, ...value };
+  };
+  const field = doc.querySelector(".translated");
+  field.value = "Hola";
+  field.oninput();
+  assert.equal(saved.length, 0);
+  field.onblur();
+  await evaluate(c, "cueEditor.flush()");
+  assert.equal(saved.at(-1).translated, "Hola");
+  assert.ok(doc.querySelector(".translated") === field);
+  doc.getElementById("undo-edit").onclick();
+  await evaluate(c, "cueEditor.flush()");
+  assert.equal(field.value, "");
+  assert.equal(saved.at(-1).translated, "");
+});
+test("invalid timing stays visible and unsaved until corrected", async () => {
+  const c = editorSetup();
+  let saves = 0;
+  c.api = async (url, opts) => {
+    saves++;
+    return { id: "c1", ...JSON.parse(opts.body) };
+  };
+  const field = c.document.querySelector(".start");
+  field.value = "00:00:03.000";
+  field.oninput();
+  field.onblur();
+  assert.equal(saves, 0);
+  assert.equal(field.getAttribute("aria-invalid"), "true");
+  assert.equal(evaluate(c, "dirty.size"), 1);
+  field.value = "00:00:01.000";
+  field.oninput();
+  field.onblur();
+  await evaluate(c, "cueEditor.flush()");
+  assert.equal(saves, 1);
+  assert.equal(field.getAttribute("aria-invalid"), null);
+});
+
+test("switching project while saving never drops a later edit", async () => {
+  const c = editorSetup(),
+    gate = deferred();
+  c.api = async (url, opts) => {
+    if (opts?.method === "PUT") {
+      await gate.promise;
+      return { id: "c1", position: 0, ...JSON.parse(opts.body) };
+    }
+    return { project: { id: "b", name: "other", state: "ready" }, cues: [] };
+  };
+  const first = c.document.querySelector(".translated");
+  first.value = "Primero";
+  first.oninput();
+  first.onblur();
+  const switching = evaluate(c, "select('b')");
+  const next = c.document.querySelector(".original");
+  next.value = "Later unsaved edit";
+  next.oninput();
+  gate.resolve();
+  await switching;
+  assert.equal(evaluate(c, "selected"), "a");
+  assert.equal(next.value, "Later unsaved edit");
+});
+test("new server data replaces an idle editor snapshot", () => {
+  const c = editorSetup();
+  evaluate(c, "detail.cues[0].original='Server correction';renderWorkspace();");
+  assert.equal(
+    c.document.querySelector(".original").value,
+    "Server correction",
+  );
 });

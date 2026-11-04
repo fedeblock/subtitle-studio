@@ -3,3 +3,5 @@
 !nginx.conf
 !index.html
 !app.js
+
+!editor-state.js

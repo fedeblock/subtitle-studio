@@ -205,21 +205,20 @@ class TranslateRequest(BaseModel):
     context: str = ""
 
 
-@app.post("/translate")
-def translate(req: TranslateRequest):
-    entries = {str(i + 1): line for i, line in enumerate(req.texts)}
+def model_subtitles(texts, context, instruction):
+    entries = {str(i + 1): line for i, line in enumerate(texts)}
     prompt = (
-        "Traduce subtítulos audiovisuales al español de España con naturalidad y precisión. "
-        "No resumas, no añadas información. Devuelve únicamente JSON con las mismas claves. "
-        "Conserva cada entrada como una frase independiente. Contexto anterior: "
-        + req.context
+        instruction
+        + " Devuelve únicamente JSON con las mismas claves y un texto no vacío por clave. "
+        + "Conserva cada entrada como una frase independiente. Contexto anterior: "
+        + context
         + "\nEntradas: "
         + json.dumps(entries, ensure_ascii=False)
     )
     payload = {
         "model": MODEL,
         "prompt": prompt,
-        "system": "Eres un traductor audiovisual profesional.",
+        "system": "Eres un especialista profesional en subtítulos audiovisuales.",
         "stream": False,
         "format": "json",
         "think": False,
@@ -231,15 +230,73 @@ def translate(req: TranslateRequest):
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
     )
+    with urllib.request.urlopen(request, timeout=900) as response:
+        res = json.load(response)
+    obj = json.loads(res["response"])
+    if not isinstance(obj, dict) or set(obj) != set(entries):
+        raise ValueError("Invalid translation keys")
+    values = [obj[str(i + 1)] for i in range(len(entries))]
+    if not all(isinstance(v, str) for v in values):
+        raise ValueError("Invalid subtitle values")
+    return values
+
+
+@app.post("/translate")
+def translate(req: TranslateRequest):
+    instruction = (
+        "Traduce subtítulos audiovisuales al español de España con naturalidad y precisión. "
+        "No resumas, no añadas información."
+    )
     try:
-        with urllib.request.urlopen(request, timeout=900) as response:
-            res = json.load(response)
-        obj = json.loads(res["response"])
-        if not isinstance(obj, dict) or set(obj) != set(entries):
-            raise ValueError("Invalid translation keys")
-        values = [obj[str(i + 1)] for i in range(len(entries))]
-        if not all(isinstance(v, str) and v.strip() for v in values):
-            raise ValueError("Empty translations")
+        try:
+            values = model_subtitles(req.texts, req.context, instruction)
+        except ValueError:
+            if len(req.texts) == 1:
+                raise
+            values = [
+                model_subtitles([text], req.context, instruction)[0]
+                for text in req.texts
+            ]
+        for index, value in enumerate(values):
+            if not value.strip():
+                single = model_subtitles([req.texts[index]], req.context, instruction)[
+                    0
+                ]
+                if not single.strip():
+                    raise ValueError(
+                        f"Traducción vacía en entrada {index + 1}, incluso individualmente"
+                    )
+                values[index] = single
         return {"texts": values}
     except Exception as e:
-        raise HTTPException(502, f"Translation error: {e}")
+        raise HTTPException(502, f"Translation error: {e}") from e
+
+
+@app.post("/improve")
+def improve(req: TranslateRequest):
+    instruction = (
+        "Corrige solo puntuación, mayúsculas y errores evidentes de transcripción en el idioma original. "
+        "Conserva exactamente el sentido y las palabras cuando sean comprensibles; "
+        "no traduzcas, resumas, agregues ni elimines información."
+    )
+    try:
+        try:
+            values = model_subtitles(req.texts, req.context, instruction)
+        except ValueError:
+            if len(req.texts) == 1:
+                raise
+            values = [
+                model_subtitles([text], req.context, instruction)[0]
+                for text in req.texts
+            ]
+        for index, value in enumerate(values):
+            if not value.strip():
+                single = model_subtitles([req.texts[index]], req.context, instruction)[
+                    0
+                ]
+                if not single.strip():
+                    raise ValueError(f"Mejora vacía en entrada {index + 1}")
+                values[index] = single
+        return {"texts": values}
+    except Exception as exc:
+        raise HTTPException(502, f"Error al mejorar texto: {exc}") from exc

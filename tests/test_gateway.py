@@ -183,3 +183,50 @@ def test_subtitle_conversion_failure_has_actionable_error(
     )
     assert response.status_code == 409
     assert "FFmpeg" in response.json()["detail"]
+
+
+def test_translation_retries_only_empty_entries_individually(gateway, monkeypatch):
+    replies = iter(
+        [
+            {"response": '{"1":"Hola","2":""}'},
+            {"response": '{"1":"Mundo"}'},
+        ]
+    )
+    payloads = []
+
+    def respond(request, timeout):
+        payloads.append(json.loads(request.data))
+        return io.BytesIO(json.dumps(next(replies)).encode())
+
+    monkeypatch.setattr(server.urllib.request, "urlopen", respond)
+    response = gateway.post(
+        "/translate",
+        json={"texts": ["Hello", "World"]},
+        headers={"X-Worker-Token": server.TOKEN},
+    )
+    assert response.status_code == 200
+    assert response.json()["texts"] == ["Hola", "Mundo"]
+    assert len(payloads) == 2
+    assert "World" in payloads[1]["prompt"] and "Hello" not in payloads[1]["prompt"]
+
+
+def test_translation_retries_malformed_batch_individually(gateway, monkeypatch):
+    replies = iter(
+        [
+            {"response": '{"1":"Hola","3":"Mundo"}'},
+            {"response": '{"1":"Hola"}'},
+            {"response": '{"1":"Mundo"}'},
+        ]
+    )
+    monkeypatch.setattr(
+        server.urllib.request,
+        "urlopen",
+        lambda *a, **kw: io.BytesIO(json.dumps(next(replies)).encode()),
+    )
+    response = gateway.post(
+        "/translate",
+        json={"texts": ["Hello", "World"]},
+        headers={"X-Worker-Token": server.TOKEN},
+    )
+    assert response.status_code == 200
+    assert response.json()["texts"] == ["Hola", "Mundo"]

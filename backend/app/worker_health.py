@@ -13,7 +13,7 @@ def main():
     if worker is None or worker.last_heartbeat is None:
         raise SystemExit(1)
     age = (datetime.now(timezone.utc) - worker.last_heartbeat).total_seconds()
-    raise SystemExit(0 if age < 120 else 1)
+    raise SystemExit(0 if age < max(120, worker.worker_ttl + 30) else 1)
 
 
 if __name__ == "__main__":

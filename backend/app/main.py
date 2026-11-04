@@ -13,6 +13,7 @@ from starlette.background import BackgroundTask
 from typing import Literal
 from app.native import native_request
 from app.project_sources import reference, save_workflow
+from app import improvement
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text, update
 from app.core import initialize, SessionLocal, Project, Cue, queue, DATA
@@ -59,6 +60,7 @@ def as_project(p):
         ],
         source_warnings=info.get("warnings", []),
         action=info.get("action", "translate"),
+        can_undo_improvement=improvement.latest(p.id)[0] is not None,
     )
     return result
 
@@ -224,6 +226,84 @@ def start_project(pid: str, body: StartRequest):
     return {"id": pid}
 
 
+@app.post("/api/projects/{pid}/improve")
+def improve_transcript(pid: str):
+    with SessionLocal() as db:
+        project = db.scalar(select(Project).where(Project.id == pid).with_for_update())
+        if not project:
+            raise HTTPException(404)
+        if project.state not in ("ready", "failed"):
+            raise HTTPException(409, "Espera a que termine el procesamiento")
+        cues = db.scalars(
+            select(Cue).where(Cue.project_id == pid).order_by(Cue.position)
+        ).all()
+        if not cues:
+            raise HTTPException(422, "No hay texto para mejorar")
+        backup_id = str(uuid.uuid4())
+        path = pathlib.Path(DATA) / pid / f"improvement-{backup_id}.json"
+        snapshot = {
+            "restored": False,
+            "previous_state": project.state,
+            "previous_error": project.error,
+            "previous_progress": project.progress,
+            "cues": [{"id": c.id, "before": c.original, "after": None} for c in cues],
+        }
+        improvement.write(path, snapshot)
+        project.state, project.progress, project.error = "improve_queued", 0, ""
+        db.commit()
+    try:
+        queue().enqueue("app.worker.improve_project", pid, backup_id, job_timeout=14400)
+    except Exception as exc:
+        with SessionLocal() as db:
+            project = db.scalar(
+                select(Project).where(Project.id == pid).with_for_update()
+            )
+            if project and project.state == "improve_queued":
+                project.state, project.error = (
+                    snapshot["previous_state"],
+                    snapshot["previous_error"],
+                )
+                db.commit()
+        raise HTTPException(
+            503, "No se pudo iniciar la mejora; se conserva el texto"
+        ) from exc
+    return {"backup": backup_id}
+
+
+@app.post("/api/projects/{pid}/improve/undo")
+def undo_improvement(pid: str):
+    with SessionLocal() as db:
+        project = db.scalar(select(Project).where(Project.id == pid).with_for_update())
+        if not project:
+            raise HTTPException(404)
+        if project.state not in ("ready", "failed"):
+            raise HTTPException(409, "Espera a que termine el procesamiento")
+        path, backup = improvement.latest(pid)
+        if not backup:
+            raise HTTPException(404, "No hay una mejora que revertir")
+        for entry in backup["cues"]:
+            cue = db.get(Cue, entry["id"])
+            if (
+                not cue
+                or cue.project_id != pid
+                or cue.original not in (entry["before"], entry["after"])
+            ):
+                raise HTTPException(
+                    409,
+                    "El texto se ha editado después de la mejora; no se sobrescribirán cambios posteriores",
+                )
+        for entry in backup["cues"]:
+            db.get(Cue, entry["id"]).original = entry["before"]
+        if project.state == "failed" and project.error.startswith("Mejora incompleta:"):
+            project.state = backup.get("previous_state", "ready")
+            project.error = backup.get("previous_error", "")
+            project.progress = backup.get("previous_progress", 100)
+        db.commit()
+        backup["restored"] = True
+        improvement.write(path, backup)
+    return {"ok": True}
+
+
 @app.get("/api/projects/{pid}")
 def get_project(pid: str):
     with SessionLocal() as db:
@@ -303,11 +383,15 @@ def media(pid: str, request: Request):
     )
 
 
-class CueUpdate(BaseModel):
+class CueFields(BaseModel):
     start: float = Field(ge=0, allow_inf_nan=False)
     end: float = Field(gt=0, allow_inf_nan=False)
     original: str = Field(max_length=10000)
     translated: str = Field(max_length=10000)
+
+
+class CueUpdate(CueFields):
+    expected: CueFields | None = None
 
 
 @app.put("/api/projects/{pid}/cues/{cid}")
@@ -325,7 +409,15 @@ def update_cue(pid: str, cid: str, body: CueUpdate):
         c = db.get(Cue, cid)
         if not c or c.project_id != pid:
             raise HTTPException(404)
-        for field in ["start", "end", "original", "translated"]:
+        fields = ["start", "end", "original", "translated"]
+        if body.expected and any(
+            getattr(c, field) != getattr(body.expected, field) for field in fields
+        ):
+            raise HTTPException(
+                409,
+                "Este segmento cambió en otra pestaña. Copia tu cambio y recarga el proyecto para revisarlo.",
+            )
+        for field in fields:
             setattr(c, field, getattr(body, field))
         db.commit()
         return as_cue(c)

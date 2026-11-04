@@ -45,6 +45,8 @@ Para detener: `bash scripts/stop.sh` y Ctrl+C en el gateway. El script usa `dock
 
 El gateway lee `.env` como datos mediante python-dotenv, sin ejecutarlo como shell. Variables exportadas en la terminal prevalecen; usa los mismos valores en ambas terminales. Un cambio en frontend/API requiere `docker compose up -d --build`.
 
+La acción opcional **Mejorar transcripción** pide a Ollama corregir mayúsculas y puntuación del texto original sin cambiar los tiempos. Conserva una instantánea previa y ofrece **Revertir última mejora**; rechaza la reversión si sobrescribiría una edición posterior. Revisa las propuestas: un modelo puede cambiar palabras o sentido. Las traducciones existentes no se actualizan automáticamente. La operación usa el modelo local y puede tardar.
+
 ## Modelos bajo demanda y memoria
 
 - Arrancar la web o el gateway no descarga ni carga pesos.
@@ -61,7 +63,7 @@ Referencias: [API de sesión MLX](https://github.com/moona3k/mlx-qwen3-asr/blob/
 - No hay migraciones destructivas ni borrado de proyectos desde la UI. `create_all` inicializa tablas sin sustituir datos. No ejecutar `docker compose down -v`, `docker volume prune` ni borrar `data/` para resolver fallos.
 - UI/API son locales, sin autenticación de usuarios. No exponerlas a Internet. El gateway escucha en todas las interfaces por compatibilidad con Docker: protege el puerto mediante firewall/red de confianza y conserva el token en secreto. Ollama puede permanecer en loopback.
 - Abrir un original por referencia no tiene el límite de subida de 2 GiB. La API de subida anterior sigue disponible para compatibilidad, conserva ese límite y sí crea una copia local. RQ limita el trabajo a cuatro horas; cada lote de traducción tiene un timeout de 900 s. La cancelación del cliente/RQ no cancela necesariamente una inferencia nativa ya iniciada.
-- Mientras se procesa, la edición se bloquea para evitar sobrescrituras. Guardar es explícito por segmento; la UI protege selección, exportación y cierre con cambios pendientes. No hay control de versiones entre varias pestañas/usuarios.
+- Mientras se procesa, la edición se bloquea para evitar sobrescrituras. Cada campo se guarda al salir de él; Deshacer/Rehacer conserva el historial durante la sesión del proyecto. La UI protege selección, exportación y cierre con cambios pendientes y permite reintentar si falla el guardado. Si una fila ha cambiado en otra pestaña, se rechaza el guardado y se conserva el texto editado para que puedas copiarlo y revisar el conflicto; no hay fusión automática.
 - No incluye diarización, waveform, división/unión, undo/redo, reglas editoriales CPS/CPL ni quemado de subtítulos en vídeo. Se importan pistas incrustadas de texto; PGS/VobSub y otras pistas de imagen necesitan OCR, aún no implementado. La compatibilidad de reproducción depende de los códecs del navegador, aunque FFmpeg pueda transcribir el archivo.
 - Redis AOF `everysec` tolera reinicios normales, pero no equivale a una cola transaccional con PostgreSQL: queda una ventana entre commit y enqueue ante una caída abrupta. No hay reconciliación automática de trabajos abandonados. Conserva y revisa BD, cola y logs antes de recuperar manualmente un proyecto atascado.
 

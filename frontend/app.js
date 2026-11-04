@@ -4,7 +4,10 @@ let projects = [],
   dirty = new Set(),
   busy = false,
   refreshing = false,
-  selectionRevision = 0;
+  selectionRevision = 0,
+  editRevision = 0,
+  cueEditor = null,
+  editorProject = null;
 const $ = (x) => document.getElementById(x),
   esc = (s) =>
     String(s ?? "").replace(
@@ -24,6 +27,8 @@ const stateName = (p) =>
     queued: "En cola",
     transcribing: "Transcripción en curso",
     translating: `Traduciendo · ${p.progress}%`,
+    improve_queued: "Mejora en cola",
+    improving: `Mejorando texto · ${p.progress}%`,
     ready: "Listo",
     failed: "Necesita atención",
   })[p.state] || p.state;
@@ -46,13 +51,16 @@ async function refresh() {
   try {
     projects = await api("/api/projects");
     renderList();
-    if (selected && !busy && dirty.size === 0) {
+    if (selected && !busy && !pendingEdits() && dirty.size === 0) {
       const pid = selected,
-        revision = selectionRevision;
+        revision = selectionRevision,
+        edits = editRevision;
       const newDetail = await api(`/api/projects/${pid}`);
       if (
         selected !== pid ||
         revision !== selectionRevision ||
+        edits !== editRevision ||
+        pendingEdits() ||
         busy ||
         dirty.size
       )
@@ -86,9 +94,12 @@ async function select(pid) {
     alert("Espera a que termine el guardado.");
     return;
   }
-  if (dirty.size && !confirm("Hay cambios sin guardar. ¿Cambiar de proyecto?"))
-    return;
+  if ((dirty.size || pendingEdits()) && !(await settleEdits())) return;
   selected = pid;
+  if (editorProject !== pid) {
+    cueEditor = null;
+    editorProject = null;
+  }
   const revision = ++selectionRevision;
   dirty.clear();
   detail = null;
@@ -141,34 +152,64 @@ function renderWorkspace() {
   }
   $("project-header").innerHTML =
     `<div class="top"><div><h2>${esc(p.name)}</h2><span class="status ${esc(p.state)}">Estado: ${esc(stateName(p))}</span></div>${ready ? '<div class="group"><select id="language"><option value="es">Español</option><option value="original">Original</option></select><select id="format"><option>srt</option><option>vtt</option></select><button id="export" class="primary">Exportar</button></div>' : ""}</div>${p.error ? `<div class="notice error">${esc(p.error)} ${p.state === "failed" ? '<button id="retry">Reintentar pendientes</button>' : ""}</div>` : ""}`;
+  if (!ready) {
+    cueEditor = null;
+    editorProject = null;
+  }
+  if (ready && (!cueEditor || editorProject !== p.id)) {
+    editorProject = p.id;
+    cueEditor = new CueEditor(
+      cues,
+      (id, value, expected) =>
+        api(`/api/projects/${p.id}/cues/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...value, expected }),
+        }),
+      (saved) => {
+        if (detail?.project.id !== p.id) return;
+        if (saved) {
+          const index = detail.cues.findIndex((c) => c.id === saved.id);
+          if (index >= 0) detail.cues[index] = saved;
+        }
+        updateSaveStatus();
+      },
+    );
+  }
+  if (ready && cueEditor && !dirty.size && !pendingEdits())
+    cueEditor.reconcile(cues);
   $("project-content").innerHTML =
-    `<div class="controls"><span class="muted">${cues.length} segmentos · ${p.source_kind === "reference" ? "Archivo original, sin copia" : "Copia local existente"}</span><span class="tiny">Los cambios se guardan por segmento.</span></div>${ready ? `<div class="cue tiny" style="border-top:1px solid #2d394f"><div>TIEMPOS</div><div>TEXTO ORIGINAL</div><div>TRADUCCIÓN AL ESPAÑOL</div><div>GUARDAR</div></div><div class="editor" id="editor">${cues.map((c, i) => `<div class="cue" data-cue="${c.id}" data-start="${c.start}" data-end="${c.end}"><div class="time"><span class="tiny">#${i + 1}</span><input aria-label="Inicio" class="start" value="${time(c.start)}"><input aria-label="Fin" class="end" value="${time(c.end)}"></div><textarea class="original" aria-label="Original">${esc(c.original)}</textarea><textarea class="translated" aria-label="Español">${esc(c.translated)}</textarea><div class="save"><button class="savebtn" disabled>Guardar</button></div></div>`).join("")}</div>` : p.state === "draft" ? sourceChoices(p) : '<div class="notice">Puedes previsualizar el original mientras se procesa. Durante la transcripción no hay un porcentaje de avance disponible; la primera ejecución puede necesitar descargar modelos.</div>'}`;
+    `<div class="controls"><span class="muted">${cues.length} segmentos · ${p.source_kind === "reference" ? "Archivo original, sin copia" : "Copia local existente"}</span></div>${ready ? editorMarkup(cues, p) : p.state === "draft" ? sourceChoices(p) : '<div class="notice">Puedes previsualizar el original mientras se procesa. Durante la transcripción no hay un porcentaje de avance disponible; la primera ejecución puede necesitar descargar modelos.</div>'}`;
   if ($("start-project")) $("start-project").onclick = () => startProject(p.id);
   if ($("retry")) $("retry").onclick = () => retryProject(p.id);
   if (ready) {
     if (p.action === "edit") $("language").value = "original";
-    $("export").onclick = () => {
-      if (busy || dirty.size) {
-        alert("Guarda los cambios antes de exportar.");
-        return;
-      }
+    $("export").onclick = async () => {
+      if (busy || !(await settleEdits())) return;
       location.href = `/api/projects/${p.id}/export?language=${$("language").value}&format=${$("format").value}`;
     };
     document.querySelectorAll(".cue[data-cue]").forEach((row) => {
-      row.querySelectorAll("input,textarea").forEach(
-        (el) =>
-          (el.oninput = () => {
-            dirty.add(row.dataset.cue);
-            row.querySelector(".savebtn").disabled = false;
-          }),
-      );
-      row.querySelector(".savebtn").onclick = () => saveCue(row);
+      row.querySelectorAll("input,textarea").forEach((el) => {
+        el.oninput = () => {
+          editRevision++;
+          dirty.add(row.dataset.cue);
+          updateSaveStatus();
+        };
+        el.onblur = () => commitField(row, el);
+      });
       row.ondblclick = (e) => {
         if (["TEXTAREA", "INPUT", "BUTTON"].includes(e.target.tagName)) return;
         $("video").currentTime = +row.dataset.start;
         $("video").play();
       };
     });
+    $("improve-text").onclick = () => improveText(p.id);
+    if ($("undo-improvement"))
+      $("undo-improvement").onclick = () => undoImprovement(p.id);
+    $("undo-edit").onclick = () => historyEdit("undo");
+    $("redo-edit").onclick = () => historyEdit("redo");
+    $("retry-save").onclick = () => cueEditor.retry();
+    updateSaveStatus();
     $("video").ontimeupdate = () => {
       let t = $("video").currentTime;
       document
@@ -183,10 +224,7 @@ function renderWorkspace() {
   }
 }
 async function retryProject(pid) {
-  if (busy || dirty.size) {
-    alert("Guarda los cambios antes de reintentar.");
-    return;
-  }
+  if (busy || !(await settleEdits())) return;
   busy = true;
   try {
     await api(`/api/projects/${pid}/retry`, { method: "POST" });
@@ -199,48 +237,159 @@ async function retryProject(pid) {
     busy = false;
   }
 }
-async function saveCue(row) {
-  if (busy) return;
-  const pid = selected;
-  let id = row.dataset.cue;
-  let start = secs(row.querySelector(".start").value),
-    end = secs(row.querySelector(".end").value);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-    alert("Tiempos incorrectos. Usa HH:MM:SS.mmm");
-    return;
-  }
-  const btn = row.querySelector(".savebtn");
-  btn.disabled = true;
-  btn.textContent = "Guardando";
-  busy = true;
-  const fields = [...row.querySelectorAll("input,textarea")];
-  fields.forEach((el) => (el.disabled = true));
+function pendingEdits() {
+  return !!cueEditor?.pending.length;
+}
+function editorMarkup(cues, project) {
+  return `<div class="editor-toolbar"><div class="group"><button id="undo-edit" title="Deshacer (⌘Z / Ctrl+Z)">↶ Deshacer</button><button id="redo-edit" title="Rehacer (⌘⇧Z / Ctrl+Shift+Z)">↷ Rehacer</button><button id="retry-save" hidden>Reintentar guardado</button><button id="improve-text" title="Corregir puntuación y mayúsculas con Ollama">Mejorar transcripción</button>${project.can_undo_improvement ? '<button id="undo-improvement">Revertir última mejora</button>' : ""}</div><span id="save-status" role="status" aria-live="polite"></span></div><p class="tiny">Guardado automático al salir de cada campo · Deshacer disponible durante esta sesión del proyecto.</p><div class="editor" id="editor"><table class="subtitle-table"><colgroup><col class="number-col"><col class="time-col"><col class="time-col"><col><col></colgroup><thead><tr><th scope="col">#</th><th scope="col">mark-in</th><th scope="col">mark-out</th><th scope="col">sub original (o transcripción)</th><th scope="col">traducción</th></tr></thead><tbody>${cues
+    .map((item, i) => {
+      const c = cueEditor.get(item.id) || item;
+      return `<tr class="cue" data-cue="${c.id}" data-start="${c.start}" data-end="${c.end}"><td class="cue-number">${i + 1}</td><td><input aria-label="Mark-in ${i + 1}" class="start" data-field="start" value="${time(c.start)}"></td><td><input aria-label="Mark-out ${i + 1}" class="end" data-field="end" value="${time(c.end)}"></td><td><textarea class="original" data-field="original" aria-label="Original ${i + 1}">${esc(c.original)}</textarea></td><td><textarea class="translated" data-field="translated" aria-label="Traducción ${i + 1}">${esc(c.translated)}</textarea></td></tr>`;
+    })
+    .join("")}</tbody></table></div>`;
+}
+function updateSaveStatus() {
+  if (!$("save-status") || !cueEditor) return;
+  const invalid = document.querySelector?.('[aria-invalid="true"]');
+  const error = cueEditor.error;
+  $("save-status").textContent = error
+    ? `Sin guardar: ${error.message}`
+    : invalid
+      ? "Revisa los tiempos marcados; ese cambio no se ha guardado."
+      : pendingEdits()
+        ? `Guardando… (${cueEditor.pending.length})`
+        : dirty.size
+          ? "Editando… se guardará al salir del campo"
+          : "Todos los cambios guardados";
+  $("save-status").classList.toggle("save-error", !!(error || invalid));
+  $("retry-save").hidden = !error;
+  $("undo-edit").disabled = !cueEditor.undoStack.length;
+  $("redo-edit").disabled = !cueEditor.redoStack.length;
+}
+function commitField(row, field) {
+  if (!cueEditor) return;
+  const key = field.dataset.field;
+  const value = ["start", "end"].includes(key)
+    ? secs(field.value)
+    : field.value;
   try {
-    const saved = await api(`/api/projects/${pid}/cues/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        start,
-        end,
-        original: row.querySelector(".original").value,
-        translated: row.querySelector(".translated").value,
-      }),
+    cueEditor.commit(row.dataset.cue, key, value);
+    field.removeAttribute("aria-invalid");
+    field.removeAttribute("title");
+    const desired = cueEditor.get(row.dataset.cue);
+    row.dataset.start = desired.start;
+    row.dataset.end = desired.end;
+    const changed = [...row.querySelectorAll("input,textarea")].some((el) => {
+      const k = el.dataset.field;
+      return (
+        (["start", "end"].includes(k) ? secs(el.value) : el.value) !==
+        desired[k]
+      );
     });
-    const index = detail.cues.findIndex((c) => c.id === id);
-    if (index >= 0) detail.cues[index] = saved;
-    row.dataset.start = start;
-    row.dataset.end = end;
-    dirty.delete(id);
-    btn.textContent = "Guardado ✓";
-    setTimeout(() => {
-      btn.textContent = "Guardar";
-    }, 1400);
-  } catch (e) {
-    btn.textContent = "Reintentar";
-    btn.disabled = false;
-    alert(e.message);
+    if (!changed) dirty.delete(row.dataset.cue);
+  } catch (error) {
+    field.setAttribute("aria-invalid", "true");
+    field.setAttribute("title", error.message);
+    dirty.add(row.dataset.cue);
+  }
+  updateSaveStatus();
+}
+function commitActiveField() {
+  const field = document.activeElement;
+  const row = field?.closest?.(".cue[data-cue]");
+  if (row && field.dataset.field) commitField(row, field);
+}
+async function settleEdits() {
+  commitActiveField();
+  if (dirty.size) {
+    alert("Corrige los campos pendientes antes de continuar.");
+    return false;
+  }
+  if (cueEditor && !(await cueEditor.flush())) {
+    updateSaveStatus();
+    return false;
+  }
+  if (dirty.size || pendingEdits()) {
+    alert(
+      "Hay cambios nuevos pendientes. Termina de editarlos antes de continuar.",
+    );
+    return false;
+  }
+  return true;
+}
+function historyEdit(direction) {
+  commitActiveField();
+  if (dirty.size || !cueEditor) return;
+  const action = cueEditor[direction]();
+  if (!action) return;
+  editRevision++;
+  const row = document.querySelector(`.cue[data-cue="${action.id}"]`);
+  const value = cueEditor.get(action.id);
+  const field = row?.querySelector(`[data-field="${action.field}"]`);
+  if (field)
+    field.value = ["start", "end"].includes(action.field)
+      ? time(value[action.field])
+      : value[action.field];
+  if (row) {
+    row.dataset.start = value.start;
+    row.dataset.end = value.end;
+  }
+  updateSaveStatus();
+}
+window.addEventListener("keydown", (e) => {
+  if (
+    !(e.metaKey || e.ctrlKey) ||
+    e.altKey ||
+    e.key.toLowerCase() !== "z" ||
+    !cueEditor
+  )
+    return;
+  // Preserve native text undo while a field contains an uncommitted edit.
+  if (dirty.size && e.target?.matches?.("input,textarea")) return;
+  e.preventDefault();
+  historyEdit(e.shiftKey ? "redo" : "undo");
+});
+async function improveText(pid) {
+  if (busy || !(await settleEdits())) return;
+  if (
+    !confirm(
+      "Ollama revisará puntuación y mayúsculas del texto original. Se conservará una copia para revertir la mejora; las traducciones existentes no se modificarán. ¿Continuar?",
+    )
+  )
+    return;
+  busy = true;
+  try {
+    await api(`/api/projects/${pid}/improve`, { method: "POST" });
+    cueEditor = null;
+    editorProject = null;
+    busy = false;
+    await select(pid);
+    await refresh();
+  } catch (error) {
+    alert(error.message);
   } finally {
-    fields.forEach((el) => (el.disabled = false));
+    busy = false;
+  }
+}
+async function undoImprovement(pid) {
+  if (busy || !(await settleEdits())) return;
+  if (
+    !confirm(
+      "¿Restaurar el texto anterior a la última mejora? Los tiempos y traducciones se conservarán.",
+    )
+  )
+    return;
+  busy = true;
+  try {
+    await api(`/api/projects/${pid}/improve/undo`, { method: "POST" });
+    cueEditor = null;
+    editorProject = null;
+    busy = false;
+    await select(pid);
+    await refresh();
+  } catch (error) {
+    alert(error.message);
+  } finally {
     busy = false;
   }
 }
@@ -295,7 +444,7 @@ async function openLocalFile() {
   }
 }
 window.addEventListener("beforeunload", (e) => {
-  if (dirty.size || busy) {
+  if (dirty.size || busy || pendingEdits()) {
     e.preventDefault();
     e.returnValue = "";
   }

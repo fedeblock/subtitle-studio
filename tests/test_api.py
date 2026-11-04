@@ -122,3 +122,29 @@ def test_retry_queue_failure_is_visible_and_keeps_media(client, queued, monkeypa
     assert client.post(f"/api/projects/{pid}/retry").status_code == 503
     assert client.get(f"/api/projects/{pid}").json()["project"]["state"] == "failed"
     assert client.get(f"/api/projects/{pid}/media").content == b"audio"
+
+
+def test_stale_editor_does_not_overwrite_other_changes(client, queued):
+    pid = upload(client).json()["id"]
+    with SessionLocal() as db:
+        db.get(Project, pid).state = "ready"
+        db.add(
+            Cue(
+                id="cue",
+                project_id=pid,
+                position=0,
+                start=1,
+                end=2,
+                original="New original",
+                translated="",
+            )
+        )
+        db.commit()
+    old = {"start": 1, "end": 2, "original": "Old original", "translated": ""}
+    change = {**old, "translated": "Hola", "expected": old}
+    response = client.put(f"/api/projects/{pid}/cues/cue", json=change)
+    assert response.status_code == 409
+    assert (
+        client.get(f"/api/projects/{pid}").json()["cues"][0]["original"]
+        == "New original"
+    )

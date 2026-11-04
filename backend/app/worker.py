@@ -2,12 +2,16 @@ import os
 import uuid
 import requests
 import socket
+import json
+from pathlib import Path
 from sqlalchemy import select, update
 from redis import Redis
 from rq import Worker, Queue
 from app.core import initialize, SessionLocal, Project, Cue
 from app.subtitles import parse_srt
 from app.project_sources import reference
+from app import improvement
+from app.core import DATA
 
 MAC_URL = os.environ.get("MAC_URL", "http://host.docker.internal:8765")
 TOKEN = os.environ.get("MAC_TOKEN", "")
@@ -104,6 +108,64 @@ def process_project(pid):
         set_status(pid, "ready", 100)
     except Exception as exc:
         set_status(pid, "failed", 0, str(exc))
+        raise
+
+
+def improve_project(pid, backup_id):
+    with SessionLocal() as db:
+        claimed = db.execute(
+            update(Project)
+            .where(Project.id == pid, Project.state == "improve_queued")
+            .values(state="improving")
+        )
+        db.commit()
+        if claimed.rowcount != 1:
+            return
+    path = Path(DATA) / pid / f"improvement-{uuid.UUID(backup_id)}.json"
+    try:
+        backup = json.loads(path.read_text())
+        items = backup["cues"]
+        for start in range(0, len(items), 6):
+            batch = items[start : start + 6]
+            texts = [item["before"] for item in batch]
+            context = " ".join(
+                item["before"] for item in items[max(0, start - 3) : start]
+            )
+            corrected = mac_post(
+                "/improve", {"texts": texts, "context": context}, timeout=900
+            )["texts"]
+            if len(corrected) != len(batch) or not all(
+                isinstance(x, str) and x.strip() for x in corrected
+            ):
+                raise ValueError("La mejora devolvió líneas inválidas")
+            # Write ahead: recovery can distinguish unchanged and corrected values after interruption.
+            for item, value in zip(batch, corrected):
+                item["after"] = value
+            improvement.write(path, backup)
+            with SessionLocal() as db:
+                for item in batch:
+                    cue = db.get(Cue, item["id"])
+                    if (
+                        not cue
+                        or cue.project_id != pid
+                        or cue.original != item["before"]
+                    ):
+                        raise ValueError("El texto cambió durante la mejora")
+                    cue.original = item["after"]
+                db.commit()
+            set_status(
+                pid,
+                "improving",
+                int(100 * min(start + len(batch), len(items)) / len(items)),
+            )
+        set_status(
+            pid,
+            backup.get("previous_state", "ready"),
+            100,
+            backup.get("previous_error", ""),
+        )
+    except Exception as exc:
+        set_status(pid, "failed", 0, f"Mejora incompleta: {exc}. Puedes revertirla.")
         raise
 
 
