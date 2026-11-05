@@ -201,7 +201,7 @@
       .player {
         width: 100%;
         background: #070b12;
-        max-height: 410px;
+        
         aspect-ratio: 16/7;
         border-radius: 11px;
         object-fit: contain;
@@ -233,7 +233,7 @@
       }
       .editor {
         overflow: auto;
-        max-height: 64vh;
+        
       }
       .subtitle-table {
         width: 100%;
@@ -402,6 +402,35 @@
       .project-open .name { display:block; font-size:12.5px; }
       .project [data-action="remove"] { border:0; border-left:1px solid #2b3850; border-radius:0; background:transparent; padding:0 9px; }
       .project .progress { display:block; height:2px; }
+      html, body { height:100%; }
+      body { display:flex; flex-direction:column; }
+      main, .layout, .work, #workspace { min-height:0; flex:1; height:100%; }
+      .work { padding:0; min-width:0; }
+      .workspace-split { height:100%; display:grid; grid-template-columns:minmax(0,46%) minmax(0,54%); min-height:0; }
+      .workspace-left { min-height:0; min-width:0; display:flex; flex-direction:column; gap:10px; padding:12px; border-right:1px solid #263148; }
+      .video-center { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; }
+      #video-frame { width:100%; aspect-ratio:16/9; max-height:100%; position:relative; background:#05080e; border-radius:10px; overflow:hidden; }
+      .player { width:100%; height:100%; aspect-ratio:auto; display:block; border-radius:0; }
+      #project-content { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:auto; }
+      .editor { min-height:0; flex:1; overflow:auto; }
+      .subtitle-table { min-width:0; }
+      .number-col { width:34px; } .time-col { width:100px; }
+      .cue textarea { min-height:50px; padding:7px 8px; font-size:12.5px; }
+      .cue input { padding:5px; font-size:11px; }
+      .subtitle-table td { padding:6px; } .subtitle-table th { padding:8px; font-size:11px; }
+      .project-top { display:flex; align-items:center; gap:9px; min-width:0; }
+      .project-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:13px; }
+      .export-group { margin-left:auto; display:flex; align-items:center; gap:5px; }
+      .workspace-meta { font-size:11px; color:#94a3b8; margin-top:10px; }
+      #workspace-controls button { padding:6px 9px; font-size:12px; }
+      .library { height:100%; }
+      @media (max-width:1279px) {
+        .workspace-split { grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); }
+        .workspace-left { border-right:0; border-bottom:1px solid #263148; }
+        .video-center { flex:none; }
+        #video-frame { width:auto; height:min(36vh, 360px); max-width:100%; }
+        .project-title { max-width:20ch; }
+      }
     </style>
   </head>
   <body>
