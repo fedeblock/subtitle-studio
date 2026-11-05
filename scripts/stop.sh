@@ -3,4 +3,4 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 docker compose stop
 printf 'Contenedores detenidos; datos, volúmenes y cola conservados.\n'
-printf 'Detén el gateway con Ctrl+C en su terminal; Ollama es independiente.\n'
+printf 'El servicio nativo y Ollama siguen activos; consulta el README para detener el servicio.\n'
