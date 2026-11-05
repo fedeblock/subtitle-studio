@@ -63,5 +63,9 @@ function bindLibrary() {
   $("show-trash").onclick = toggleTrash;
   $("clear-library").onclick = clearLibrary;
   $("restore-library").onclick = restoreLibrary;
+  document.addEventListener("click", (event) => {
+    if (!libraryCollapsed && !$("library-toggle").contains(event.target) && !document.querySelector(".library").contains(event.target))
+      toggleLibrary();
+  });
 }
 bindLibrary();

@@ -92,6 +92,15 @@ test("collapsing the library survives a list re-render", () => {
   assert.ok(c.document.body.classList.contains('library-collapsed')); evaluate(c,'toggleLibrary();renderList()');
   assert.equal(c.document.body.classList.contains('library-collapsed'),false);
 });
+test("clicking outside the library closes it, while clicking inside keeps it open", () => {
+  const c = domSetup(), d = c.document;
+  evaluate(c, "toggleLibrary()");
+  d.querySelector('.library').dispatchEvent(new d.defaultView.Event('click', {bubbles:true}));
+  assert.equal(d.body.classList.contains('library-collapsed'), false);
+  d.getElementById('workspace').dispatchEvent(new d.defaultView.Event('click', {bubbles:true}));
+  assert.equal(d.body.classList.contains('library-collapsed'), true);
+  assert.equal(d.getElementById('library-toggle').getAttribute('aria-expanded'), 'false');
+});
 test("the workspace header no longer carries the remove button", () => {
   const c=domSetup(); evaluate(c,"detail={project:{id:'a',name:'a.mkv',state:'ready',progress:100,source_kind:'reference'},cues:[{id:'1',start:1,end:2,original:'hi',translated:''}]};renderWorkspace();");
   assert.equal(c.document.getElementById('project-remove'),null); assert.ok(c.document.querySelector('.workspace-split'));
