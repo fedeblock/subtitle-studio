@@ -76,7 +76,7 @@
         font-size: 12px;
       }
       main {
-        max-width: 1450px;
+        width: 100%;
         margin: auto;
         padding: 26px 24px;
       }
@@ -384,49 +384,36 @@
           padding: 15px;
         }
       }
+      .topbar { height: 40px; padding: 0 10px; gap: 10px; justify-content: flex-start; }
+      .topbar .brand { font-size: 14px; color: #67c3ff; }
+      .topbar #project-header { flex: 1; min-width: 0; }
+      .topbar .badge { font-size: 11px; padding: 2px 8px; white-space: nowrap; }
+      .topbar button { padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+      main { padding: 0; }
+      .library { display:flex; flex-direction:column; }
+      .library-footer { display:flex; gap: 10px; padding: 8px; border-top: 1px solid #263148; }
+      .library-footer button { border:0; background:transparent; padding:0; font-size:11px; color:#94a3b8; }
     </style>
   </head>
   <body>
-    <header>
-      <div class="brand">▣ <span>Subtitle</span> Studio</div>
-      <div class="badge">● Procesamiento local</div>
+    <header class="topbar">
+      <button id="library-toggle" aria-label="Mostrar biblioteca" aria-expanded="false">☰</button>
+      <span class="brand">▣</span>
+      <div id="project-header"></div>
+      <span class="badge">● Local</span>
+      <button class="primary" id="open-local">Abrir archivo local</button>
     </header>
-    <main>
-      <div class="top">
-        <div>
-          <h1>Proyectos</h1>
-          <div class="muted">
-            Trabaja con tus vídeos y subtítulos originales, sin copiarlos ni
-            enviarlos a Internet.
-          </div>
+    <main><div class="layout">
+      <aside class="panel library">
+        <div class="list" id="projects">Cargando...</div>
+        <div class="library-footer">
+          <button id="show-trash">Papelera</button>
+          <button id="clear-library">Vaciar biblioteca</button>
+          <button id="restore-library" hidden>Restaurar todo</button>
         </div>
-        <div>
-          <button class="primary" id="open-local">Abrir archivo local</button>
-        </div>
-      </div>
-      <div class="layout">
-        <aside class="panel">
-          <div class="heading">Biblioteca</div>
-          <div class="library-actions">
-            <button id="show-trash">Papelera</button
-            ><button id="clear-library">Vaciar biblioteca</button
-            ><button id="restore-library" hidden>Restaurar todo</button>
-          </div>
-          <div class="list" id="projects">Cargando...</div>
-          <div class="footer">Qwen3-ASR · MLX · Ollama</div>
-        </aside>
-        <section class="panel">
-          <div class="work">
-            <div id="workspace">
-              <div class="empty">
-                Abre un archivo local o selecciona un proyecto. El original no
-                se duplica.
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-    </main>
+      </aside>
+      <section class="work"><div id="workspace"><div class="empty">Abre un archivo local o selecciona un proyecto.</div></div></section>
+    </div></main>
     <script src="/editor-state.js" defer></script>
     <script src="/app.js" defer></script>
   </body>

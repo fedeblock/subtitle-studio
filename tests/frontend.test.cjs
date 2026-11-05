@@ -59,6 +59,22 @@ test("every element app.js binds at load exists in index.html", () => {
   for (const id of ["open-local", "show-trash", "clear-library", "restore-library", "projects", "workspace"])
     assert.ok(c.document.getElementById(id), `falta #${id}`);
 });
+test("the shell keeps only video and subtitles as permanent chrome", () => {
+  const c = domSetup(), html = c.document.documentElement.innerHTML;
+  assert.equal(c.document.querySelector("h1"), null);
+  assert.ok(!html.includes("Qwen3-ASR · MLX · Ollama"));
+  assert.ok(!html.includes("sin copiarlos ni enviarlos a Internet"));
+  assert.ok(c.document.querySelector(".badge"));
+  assert.ok(c.document.getElementById("library-toggle"));
+});
+test("the layout is not capped at a fixed width", () => {
+  assert.ok(!/max-width:\s*1450px/.test(fs.readFileSync("frontend/index.html", "utf8")));
+});
+test("the project header shares the one chrome band", () => {
+  const c = domSetup(), header = c.document.getElementById("project-header");
+  assert.ok(header && c.document.querySelector(".topbar #project-header"));
+  assert.equal(c.document.getElementById("workspace").querySelector("#project-header"), null);
+});
 
 test("time formatter carries rounded milliseconds into next minute", () => {
   const c = setup();
