@@ -7,7 +7,14 @@ from pathlib import Path
 from sqlalchemy import select, update
 from redis import Redis
 from rq import Worker, Queue
-from app.core import initialize, SessionLocal, Project, Cue, engine
+from app.core import (
+    initialize,
+    SessionLocal,
+    Project,
+    Cue,
+    TranscriptionProgress,
+    engine,
+)
 from app.subtitles import parse_srt
 from app.project_sources import reference
 from app import improvement
@@ -58,7 +65,27 @@ def process_project(pid):
                 select(Cue).where(Cue.project_id == pid).order_by(Cue.position)
             ).all()
             cues = [{"original": c.original} for c in existing]
-        if not cues:
+        info = reference(pid)
+        with SessionLocal() as db:
+            checkpoint = db.get(TranscriptionProgress, pid)
+            incremental = bool(checkpoint) or (
+                not cues and info.get("selected_source") == "asr"
+            )
+            if incremental and not checkpoint:
+                db.add(TranscriptionProgress(project_id=pid, next_start=0, completed=0))
+                db.commit()
+        if incremental:
+            transcribe_incrementally(pid, info)
+            with SessionLocal() as db:
+                cues = [
+                    {"original": c.original}
+                    for c in db.scalars(
+                        select(Cue).where(Cue.project_id == pid).order_by(Cue.position)
+                    ).all()
+                ]
+            if not cues:
+                raise ValueError("No se detectaron subtítulos válidos")
+        elif not cues:
             request = {"project_id": pid}
             audio_index = reference(pid).get("audio_index")
             if audio_index is not None:
@@ -113,6 +140,47 @@ def process_project(pid):
     except Exception as exc:
         set_status(pid, "failed", 0, str(exc))
         raise
+
+
+def transcribe_incrementally(pid, info):
+    while True:
+        with SessionLocal() as db:
+            checkpoint = db.get(TranscriptionProgress, pid)
+            if checkpoint.completed:
+                return
+            start = checkpoint.next_start
+        request = {"project_id": pid, "segment_start": start}
+        if info.get("audio_index") is not None:
+            request["audio_index"] = info["audio_index"]
+        if info.get("asr_language"):
+            request["language"] = info["asr_language"]
+        result = mac_post("/transcribe-chunk", request)
+        srt = result.get("srt")
+        if not isinstance(srt, str):
+            raise ValueError("El gateway devolvió un subtítulo inválido")
+        new_cues = parse_srt(srt)
+        if srt.strip() and not new_cues:
+            raise ValueError("El gateway devolvió marcas de tiempo inválidas")
+        if not isinstance(result.get("end_of_audio"), bool):
+            raise ValueError("El gateway no indicó el final del audio")
+        with SessionLocal() as db:
+            checkpoint = db.get(TranscriptionProgress, pid)
+            if checkpoint.next_start != start or checkpoint.completed:
+                raise ValueError("La transcripción cambió durante el procesamiento")
+            existing = db.scalars(
+                select(Cue).where(Cue.project_id == pid).order_by(Cue.position)
+            ).all()
+            for i, cue in enumerate(new_cues, start=len(existing)):
+                if cue["start"] < start or cue["end"] > start + 30.001:
+                    raise ValueError(
+                        "La transcripción devolvió tiempos fuera del tramo"
+                    )
+                db.add(Cue(id=str(uuid.uuid4()), project_id=pid, position=i, **cue))
+            checkpoint.next_start = start + 30
+            checkpoint.completed = int(result["end_of_audio"])
+            if result.get("language"):
+                db.get(Project, pid).language = result["language"]
+            db.commit()
 
 
 def improve_project(pid, backup_id):

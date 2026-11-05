@@ -107,6 +107,11 @@ class AudioTranscribeRequest(TranscribeRequest):
     audio_index: int | None = Field(default=None, ge=0)
 
 
+class ChunkTranscribeRequest(AudioTranscribeRequest):
+    segment_start: int = Field(ge=0)
+    language: str | None = Field(default=None, min_length=1, max_length=64)
+
+
 def project_folder(pid):
     try:
         pid = str(UUID(str(pid)))
@@ -306,6 +311,26 @@ def transcribe(req: AudioTranscribeRequest):
         if req.audio_index is None:
             return app.state.asr.transcribe(source)
         return app.state.asr.transcribe(source, audio_index=req.audio_index)
+    except Exception as exc:
+        raise HTTPException(502, f"Transcription error: {str(exc)[-2000:]}") from exc
+
+
+@app.post("/transcribe-chunk")
+def transcribe_chunk(req: ChunkTranscribeRequest):
+    source = resolve_source(req.project_id)
+    if req.audio_index is not None:
+        reference = load_reference(project_folder(req.project_id))
+        if req.audio_index not in [
+            item["index"] for item in reference.get("audio_tracks", [])
+        ]:
+            raise HTTPException(400, "Pista de audio no autorizada o inexistente")
+    try:
+        return app.state.asr.transcribe_chunk(
+            source,
+            req.segment_start,
+            audio_index=req.audio_index,
+            language=req.language,
+        )
     except Exception as exc:
         raise HTTPException(502, f"Transcription error: {str(exc)[-2000:]}") from exc
 

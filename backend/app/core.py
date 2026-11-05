@@ -52,3 +52,12 @@ class Cue(Base):
 class HiddenProject(Base):
     __tablename__ = "hidden_projects"
     project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
+
+
+class TranscriptionProgress(Base):
+    """Durable checkpoint committed together with each batch of new cues."""
+
+    __tablename__ = "transcription_progress"
+    project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
+    next_start = Column(Integer, nullable=False, default=0)
+    completed = Column(Integer, nullable=False, default=0)

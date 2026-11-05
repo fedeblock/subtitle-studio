@@ -129,20 +129,28 @@ const secs = (s) => {
     Number((match[4] || "").padEnd(3, "0")) / 1000
   );
 };
+function workspaceMode(project, cues, inTrash) {
+  if (project.state === "draft") return "draft";
+  if (cues.length && inTrash) return "locked";
+  if (cues.length && ["ready", "failed"].includes(project.state)) return "editable";
+  return cues.length ? "locked" : "waiting";
+}
+function defaultExportLanguage(cues) {
+  return cues.some(c => (c.translated || "").trim()) ? "es" : "original";
+}
 function renderWorkspace() {
   if (!detail) return;
   let p = detail.project,
     cues = detail.cues;
-  const finished =
-    !viewingTrash && ["ready", "failed"].includes(p.state) && cues.length > 0;
-  const viewMode = finished && p.action === "view";
-  const ready = finished && !viewMode;
-  const showReadOnly = !ready && p.state !== "draft" && cues.length > 0;
+  const mode = workspaceMode(p, cues, viewingTrash);
+  const ready = mode === "editable";
+  const finished = ready;
+  const showReadOnly = mode === "locked";
   const oldScroll = $("editor")?.scrollTop || 0;
   const workspace = $("workspace");
   if (workspace.dataset.projectId !== p.id || !$("video")) {
     const tracks = p.audio_tracks || [];
-    workspace.innerHTML = `<div class="workspace-split"><div class="workspace-left player-frame"><div class="video-center"><div id="video-frame"><video id="video" class="player" controls preload="metadata" src="/api/projects/${p.id}/media"></video><div id="video-subtitles" class="video-subtitles" hidden></div></div></div>${tracks.length ? `<div id="audio-controls"><label>Audio del vídeo <select id="audio-track">${tracks.map(t => `<option value="${t.index}" ${t.index === p.audio_index ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></label> <label>Volumen <input id="audio-volume" type="range" min="0" max="1" step="0.05" value="1"></label><audio id="player-audio" hidden preload="none"></audio><div id="audio-status" class="tiny" role="status"></div></div>` : ""}<div id="media-error" class="notice error" hidden></div><div id="workspace-controls"></div></div><div id="project-content"></div></div>`;
+    workspace.innerHTML = `<div class="workspace-split"><div class="workspace-left player-frame"><div class="video-center"><div id="video-frame"><video id="video" class="player" controls preload="metadata" src="/api/projects/${p.id}/media"></video><div id="video-subtitles" class="video-subtitles" hidden></div></div></div>${tracks.length ? `<details id="audio-controls" class="audio-details"><summary>Pista de audio</summary><div class="audio-options"><label>Audio del vídeo <select id="audio-track">${tracks.map(t => `<option value="${t.index}" ${t.index === p.audio_index ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></label> <label>Volumen <input id="audio-volume" type="range" min="0" max="1" step="0.05" value="1"></label><audio id="player-audio" hidden preload="none"></audio><div id="audio-status" class="tiny" role="status"></div></div></details>` : ""}<div id="media-error" class="notice error" hidden></div><div id="workspace-controls"></div></div><div id="project-content"></div></div>`;
     workspace.dataset.projectId = p.id;
     if (tracks.length) configurePlayerAudio(p.id);
     $("video").addEventListener("timeupdate", updateVideoSubtitles);
@@ -153,6 +161,10 @@ function renderWorkspace() {
       message.textContent =
         "No se puede reproducir el original. Comprueba que sigue en su ubicación y que el navegador admite su formato. Los subtítulos se pueden editar igualmente.";
     };
+  }
+  if ($("audio-controls")) {
+    if (mode === "draft") $("audio-controls").setAttribute("open", "");
+    else $("audio-controls").removeAttribute("open");
   }
   $("project-header").innerHTML = `<div class="project-top"><strong class="project-title" title="${esc(p.name)}">${esc(p.name)}</strong><span class="status ${esc(p.state)}">${esc(stateName(p))}</span>${finished ? '<div class="group export-group"><select id="language" aria-label="Idioma de exportación"><option value="es">Español</option><option value="original">Original</option></select><select id="format" aria-label="Formato"><option>srt</option><option>vtt</option></select><button id="export" class="primary">Guardar junto al vídeo</button><button id="download">Descargar</button></div>' : ""}</div>`;
   if (!ready) {
@@ -182,14 +194,10 @@ function renderWorkspace() {
   if (ready && cueEditor && !dirty.size && !pendingEdits())
     cueEditor.reconcile(cues);
   $("workspace-controls").innerHTML = `${p.error ? `<div class="notice error">${esc(p.error)} ${p.state === "failed" && !viewingTrash ? '<button id="retry">Reintentar pendientes</button>' : ""}</div>` : ""}${ready ? editorToolbar(cues, p) : showReadOnly ? editorToolbar(cues, p, true) : ""}<div class="workspace-meta">${cues.length} segmentos · ${p.source_kind === "reference" ? "Archivo original, sin copia" : "Copia local existente"}</div>`;
-  $("project-content").innerHTML = `${viewMode ? `<div class="group"><button id="edit-view">Editar o mejorar</button>${cues.some(c => !(c.translated || "").trim()) ? '<button id="translate-view">Traducir pendientes</button>' : ""}</div>` : ""}${ready ? editorTable(cues, p) : showReadOnly ? editorTable(cues, p, true) : p.state === "draft" ? (viewingTrash ? '<div class="notice">Restaura el proyecto para procesarlo.</div>' : sourceChoices(p)) : '<div class="notice">Puedes previsualizar el original mientras se procesa. Durante la transcripción no hay un porcentaje de avance disponible; la primera ejecución puede necesitar descargar modelos.</div>'}`;
+  $("project-content").innerHTML = `${ready ? editorTable(cues, p) : showReadOnly ? editorTable(cues, p, true) : p.state === "draft" ? (viewingTrash ? '<div class="notice">Restaura el proyecto para procesarlo.</div>' : sourceChoices(p)) : '<div class="notice">Los segmentos aparecerán a medida que avance la transcripción. La primera ejecución puede necesitar descargar modelos.</div>'}`;
   if (!viewingTrash && p.state !== "draft" && cues.length) {
     viewedCues = cues;
     updateVideoSubtitles();
-  }
-  if (viewMode) {
-    $("edit-view").onclick = () => editViewedProject(p.id);
-    if ($("translate-view")) $("translate-view").onclick = () => translatePending(p.id);
   }
   if ($("editor")) $("editor").scrollTop = oldScroll;
   if ($("start-project")) {
@@ -198,7 +206,6 @@ function renderWorkspace() {
       updateDraftAction();
       return loadSubtitlePreview(p.id);
     };
-    $("subtitle-action").onchange = updateDraftAction;
     updateDraftAction();
   }
   if (cues.length) {
@@ -220,7 +227,7 @@ function renderWorkspace() {
   }
   if ($("retry")) $("retry").onclick = () => retryProject(p.id);
   if (finished) {
-    if (p.action === "edit" || p.action === "view") $("language").value = "original";
+    $("language").value = defaultExportLanguage(cues);
     $("export").onclick = async () => {
       if (busy || !(await settleEdits())) return;
       busy = true;
@@ -300,7 +307,7 @@ async function loadSubtitlePreview(pid) {
   const select = $("subtitle-source"),
     target = $("subtitle-preview");
   if (!select || !target) return;
-  const source = select.value,
+  const source = selectedSource(),
     revision = ++subtitlePreviewRevision;
   viewedCues = [];
   updateVideoSubtitles();
@@ -320,7 +327,7 @@ async function loadSubtitlePreview(pid) {
       revision !== subtitlePreviewRevision ||
       $("subtitle-source") !== select ||
       selected !== pid ||
-      select.value !== source
+      selectedSource() !== source
     )
       return;
     viewedCues = data.cues;
@@ -402,7 +409,7 @@ function pendingEdits() {
 }
 function editorToolbar(cues, project, readOnly = false) {
   const toolbar = readOnly
-    ? `<div class="notice">${project.action === "view" && project.state === "ready" ? "Vista de solo lectura. Puedes elegir editar o traducir cuando quieras." : "Segmentos visibles en modo lectura mientras se procesa; la edición se reactivará al terminar."}</div>`
+    ? `<div class="notice">${viewingTrash ? "Restaura el proyecto para editarlo." : "Segmentos visibles en modo lectura mientras se procesa; la edición se reactivará al terminar."}</div>`
     : `<div class="editor-toolbar"><div class="group"><button id="undo-edit" title="Deshacer (⌘Z / Ctrl+Z)">↶ Deshacer</button><button id="redo-edit" title="Rehacer (⌘⇧Z / Ctrl+Shift+Z)">↷ Rehacer</button><button id="retry-save" hidden>Reintentar guardado</button><button id="improve-text" title="Corregir puntuación y mayúsculas con Ollama">Mejorar transcripción</button>${cues.some((c) => !(c.translated || "").trim()) ? '<button id="translate-pending">Traducir pendientes</button>' : ""}${project.can_undo_improvement ? '<button id="undo-improvement">Revertir última mejora</button>' : ""}</div><span id="save-status" role="status" aria-live="polite"></span></div>`;
   return toolbar;
 }
@@ -559,36 +566,11 @@ async function undoImprovement(pid) {
     busy = false;
   }
 }
-function sourceChoices(p) {
-  const options = p.subtitle_options || [],
-    tracks = p.audio_tracks || [];
-  return `<div class="notice"><h2>¿Qué subtítulos quieres usar?</h2><p>El vídeo se lee desde su ubicación original. No se copia ni se envía a Internet.${tracks.length ? " La pista de audio seleccionada en el reproductor se usará para transcribir." : ""}</p><label>Fuente <select id="subtitle-source"><option value="" selected disabled>Elige una fuente</option><option value="asr">Generar desde el audio con ASR</option>${options.map((o) => `<option value="${esc(o.id)}" ${o.supported ? "" : "disabled"}>${esc(o.label)} · ${o.kind === "embedded" ? "incrustado" : "archivo"}${o.supported ? "" : " · requiere OCR/conversión"}</option>`).join("")}</select></label><div id="subtitle-preview" class="subtitle-preview" hidden></div><label> Acción <select id="subtitle-action"><option value="view" selected>Ver subtítulos</option><option value="edit">Editar o mejorar</option><option value="translate">Traducir al español</option></select></label><button id="start-project" class="primary">Ver subtítulos</button>${options.length ? "" : "<p>No se encontraron archivos de subtítulos ni pistas incrustadas.</p>"}${(p.source_warnings || []).map((w) => `<p>${esc(w)}</p>`).join("")}</div>`;
-}
-function updateDraftAction() {
-  if (!$("start-project") || !$("subtitle-action") || !$("subtitle-source"))
-    return;
-  const viewing = $("subtitle-action").value === "view";
-  $("start-project").textContent = viewing
-    ? $("subtitle-source").value === "asr"
-      ? "Transcribir para ver"
-      : "Ver subtítulos"
-    : "Continuar";
-}
 async function startProject(pid) {
   if (busy) return;
-  const source = $("subtitle-source").value;
+  const source = selectedSource();
   if (!source) {
     alert("Elige una fuente de subtítulos.");
-    return;
-  }
-  const action = $("subtitle-action").value;
-  if (action === "view" && source !== "asr") {
-    if ($("subtitle-preview").dataset.loadedSource !== source)
-      await loadSubtitlePreview(pid);
-    $("subtitle-preview")?.scrollIntoView?.({
-      block: "nearest",
-      behavior: "smooth",
-    });
     return;
   }
   busy = true;
@@ -599,7 +581,8 @@ async function startProject(pid) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         source,
-        action,
+        action: "edit",
+        asr_language: source === "asr" ? ($("asr-language")?.value || null) : null,
         audio_index:
           source === "asr" && $("audio-track")
             ? Number($("audio-track").value)
@@ -612,20 +595,6 @@ async function startProject(pid) {
   } catch (e) {
     alert(e.message);
     if ($("start-project")) $("start-project").disabled = false;
-  } finally {
-    busy = false;
-  }
-}
-async function editViewedProject(pid) {
-  if (busy) return;
-  busy = true;
-  try {
-    await api(`/api/projects/${pid}/edit-mode`, { method: "POST" });
-    busy = false;
-    await select(pid);
-    await refresh();
-  } catch (error) {
-    alert(error.message);
   } finally {
     busy = false;
   }

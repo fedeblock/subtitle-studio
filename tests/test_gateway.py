@@ -19,6 +19,29 @@ def test_health_requires_token_and_does_not_load_models(gateway):
     assert result.json()["idle_seconds"] == 600
 
 
+def test_chunk_transcription_passes_language_and_offset_to_runtime(
+    gateway, monkeypatch, tmp_path
+):
+    source = tmp_path / "clip.mkv"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(server, "resolve_source", lambda pid: source)
+    seen = []
+    monkeypatch.setattr(
+        server.app.state.asr,
+        "transcribe_chunk",
+        lambda path, start, **kw: seen.append((path, start, kw))
+        or {"srt": "", "end_of_audio": True},
+    )
+    pid = str(uuid.uuid4())
+    response = gateway.post(
+        "/transcribe-chunk",
+        json={"project_id": pid, "segment_start": 30, "language": "Romanian"},
+        headers={"X-Worker-Token": server.TOKEN},
+    )
+    assert response.status_code == 200
+    assert seen == [(source, 30, {"audio_index": None, "language": "Romanian"})]
+
+
 def test_symlink_source_cannot_escape_data(gateway, tmp_path):
     folder = server.ROOT / str(uuid.uuid4())
     folder.mkdir(parents=True)

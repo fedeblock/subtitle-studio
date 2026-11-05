@@ -200,14 +200,19 @@ def test_selected_audio_is_saved_and_sent_to_worker(client, monkeypatch):
 
     def native(path, json, **kwargs):
         seen.append((path, json))
-        return {"srt": "1\n00:00:00,000 --> 00:00:01,000\nHello\n"}
+        return {
+            "srt": "1\n00:00:00,000 --> 00:00:01,000\nHello\n",
+            "end_of_audio": True,
+        }
 
     monkeypatch.setattr(worker, "mac_post", native)
     worker.process_project(pid)
-    assert seen == [("/transcribe", {"project_id": pid, "audio_index": 3})]
+    assert seen == [
+        ("/transcribe-chunk", {"project_id": pid, "audio_index": 3, "segment_start": 0})
+    ]
 
 
-def test_transcribe_to_view_then_enter_edit_mode(client, monkeypatch):
+def test_transcribe_lands_editable_without_edit_mode(client, monkeypatch):
     from app import worker
 
     pid = local_project()
@@ -218,25 +223,25 @@ def test_transcribe_to_view_then_enter_edit_mode(client, monkeypatch):
 
     def native(path, payload, **kwargs):
         seen.append(path)
-        return {"srt": "1\n00:00:00,000 --> 00:00:01,000\nHello\n"}
+        return {
+            "srt": "1\n00:00:00,000 --> 00:00:01,000\nHello\n",
+            "end_of_audio": True,
+        }
 
     monkeypatch.setattr(worker, "mac_post", native)
     assert (
         client.post(
-            f"/api/projects/{pid}/start", json={"source": "asr", "action": "view"}
+            f"/api/projects/{pid}/start", json={"source": "asr", "action": "edit"}
         ).status_code
         == 200
     )
     worker.process_project(pid)
     detail = client.get(f"/api/projects/{pid}").json()
-    assert seen == ["/transcribe"]
+    assert seen == ["/transcribe-chunk"]
     assert detail["project"]["state"] == "ready"
-    assert detail["project"]["action"] == "view"
+    assert detail["project"]["action"] == "edit"
     assert detail["cues"][0]["original"] == "Hello"
-    assert client.post(f"/api/projects/{pid}/edit-mode").status_code == 200
-    edited = client.get(f"/api/projects/{pid}").json()
-    assert edited["project"]["action"] == "edit"
-    assert edited["cues"] == detail["cues"]
+    assert client.post(f"/api/projects/{pid}/edit-mode").status_code == 404
 
 
 def test_selected_audio_must_be_from_inspected_tracks(client):
@@ -246,6 +251,30 @@ def test_selected_audio_must_be_from_inspected_tracks(client):
         json={"source": "asr", "action": "edit", "audio_index": 123},
     )
     assert response.status_code == 400
+    assert client.get(f"/api/projects/{pid}").json()["project"]["state"] == "draft"
+
+
+def test_selected_asr_language_is_preserved_for_transcription(client, monkeypatch):
+    from app.project_sources import reference
+
+    pid = local_project()
+    monkeypatch.setattr(
+        main, "queue", lambda: SimpleNamespace(enqueue=lambda *a, **kw: None)
+    )
+    response = client.post(
+        f"/api/projects/{pid}/start",
+        json={"source": "asr", "action": "edit", "asr_language": "Romanian"},
+    )
+    assert response.status_code == 200
+    assert reference(pid)["asr_language"] == "Romanian"
+
+
+def test_start_rejects_new_view_mode_without_changing_draft(client):
+    pid = local_project()
+    response = client.post(
+        f"/api/projects/{pid}/start", json={"source": "asr", "action": "view"}
+    )
+    assert response.status_code == 422
     assert client.get(f"/api/projects/{pid}").json()["project"]["state"] == "draft"
 
 

@@ -431,6 +431,22 @@
         #video-frame { width:auto; height:min(36vh, 360px); max-width:100%; }
         .project-title { max-width:20ch; }
       }
+      .source-picker { padding:16px; overflow:auto; min-height:0; }
+      .source-picker h2 { font-size:15px; margin:0 0 10px; }
+      .source-cta { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+      .source-note { font-size:12px; color:#94a3b8; }
+      .source-group { margin:14px 0; }
+      .source-group h3 { margin:0 0 6px; font-size:11px; color:#9baac2; font-weight:600; }
+      .source-option { display:flex; gap:9px; align-items:center; padding:8px 10px; margin-bottom:5px; border:1px solid #2b3850; border-radius:8px; background:#111a2b; font-size:12.5px; cursor:pointer; }
+      .source-option:has(input:checked) { border-color:#57b5fa; background:#203451; }
+      .source-option input { accent-color:#57b5fa; }
+      .source-picker .subtitle-preview { border:0; border-top:1px solid #2b3850; border-radius:0; padding:12px 0; }
+      .audio-details { border:1px solid #2b3850; border-radius:8px; background:#101a2b; font-size:12px; }
+      .audio-details summary { cursor:pointer; padding:7px 10px; color:#aebdd4; }
+      .audio-options { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:0 10px 8px; }
+      #asr-options { padding:8px 10px; font-size:12px; color:#aebdd4; }
+      #asr-options select { background:#0d172a; color:#e8edf7; border:1px solid #314057; border-radius:6px; padding:5px; }
+      #asr-options p { margin:7px 0 0; }
     </style>
   </head>
   <body>
@@ -453,7 +469,8 @@
       <section class="work"><div id="workspace"><div class="empty">Abre un archivo local o selecciona un proyecto.</div></div></section>
     </div></main>
     <script src="/editor-state.js" defer></script>
-    <script src="/app.js?v=ux-phase1b" defer></script>
+    <script src="/app.js?v=ux-phase2-asr" defer></script>
     <script src="/library.js?v=outside-click" defer></script>
+    <script src="/sources.js?v=ux-phase2-asr" defer></script>
   </body>
 </html>
