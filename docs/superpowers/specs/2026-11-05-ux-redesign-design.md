@@ -20,9 +20,12 @@ qué vas a hacer con un subtítulo que todavía no conoces.
 
 Este rediseño quita la decoración, funde las dos vistas en una sola siempre
 editable, reordena la elección de fuente alrededor de cómo se buscan de verdad
-los subtítulos, y añade las dos capacidades que faltan para poder terminar el
-trabajo sin salir de la herramienta: insertar y borrar segmentos, y traducir a
-un idioma que no sea el español.
+los subtítulos, y añade la capacidad que falta para poder terminar el trabajo
+sin salir de la herramienta: traducir a un idioma que no sea el español.
+
+Insertar y borrar segmentos se diseñó aquí y **queda aplazado a una versión
+mayor** (decisión de Federico, 2026-11-05). Lo decidido se conserva en este
+documento, marcado, para que esa versión no tenga que volver a decidirlo.
 
 ## Objetivos
 
@@ -33,15 +36,16 @@ un idioma que no sea el español.
 3. La biblioteca es plegable y las acciones de un proyecto están en el proyecto.
 4. Elegir fuente es un paso corto y agrupado, no un desplegable plano de trece
    entradas con cosas que no se pueden usar.
-5. Se pueden insertar y borrar segmentos respetando los tiempos.
-6. Se puede traducir a un idioma destino elegido, no solo al español.
-7. Mientras corre una traducción o una mejora se ven los cambios llegando y se
+5. Se puede traducir a un idioma destino elegido, no solo al español.
+6. Mientras corre una traducción o una mejora se ven los cambios llegando y se
    puede detener la operación.
 
 ## No objetivos
 
 - Varios idiomas de traducción conviviendo en el mismo proyecto. Siempre es uno
   a la vez. (Decisión explícita de Federico.)
+- **Insertar y borrar segmentos. Aplazado a una versión mayor.** No entra en
+  este ciclo, aunque su diseño esté cerrado más abajo.
 - OCR para pistas de subtítulo de imagen (PGS, VobSub). Se siguen sin soportar;
   el cambio es que dejan de mostrarse.
 - Dividir y unir segmentos, forma de onda, diarización, reglas CPS/CPL, quemado
@@ -126,7 +130,7 @@ leerse la interfaz:
    un archivo dentro de la carpeta `Subs`/`Subtitles`, o transcribir el audio
    con ASR. Si se elige ASR, hace falta además decir qué pista de audio.
 3. **Trabajar.** Ver el vídeo con los subtítulos encima, corregir texto y
-   tiempos, insertar y borrar segmentos, lanzar la mejora de transcripción,
+   tiempos, lanzar la mejora de transcripción,
    lanzar la traducción al idioma elegido.
 4. **Exportar.** Guardar junto al vídeo o descargar, en SRT o VTT, en original o
    traducido.
@@ -176,7 +180,11 @@ constructor.
   archivos junto al vídeo, carpeta `Subs`) en vez de ser un desplegable nativo
   plano. En el caso real que motivó esto había trece entradas mezcladas.
 
-### Insertar y borrar segmentos
+### Insertar y borrar segmentos · aplazado a una versión mayor
+
+Nada de esta sección entra en el ciclo actual. Se conserva porque está decidido
+y porque la fase 5 toca el mismo editor: quien la construya debe saber que esto
+llegará.
 
 - Se puede insertar un segmento **antes o después** de uno existente.
 - **Si no hay hueco, se rechaza y se avisa.** Es decir: si el mark-out del nuevo
@@ -259,7 +267,7 @@ Federico pidió. Son revisables.
 Las tres preguntas que levantó la revisión del documento están resueltas por
 Federico. Se registran aquí porque corrigen o concretan lo anterior.
 
-### Borrar un segmento: deshacer solo en el navegador
+### Borrar un segmento: deshacer solo en el navegador · aplazado
 
 Deshacer un borrado **puede residir únicamente en memoria del navegador**. No
 hace falta registro recuperable en disco ni interfaz de restauración. Basta el
@@ -285,7 +293,7 @@ siguiendo el patrón de **Guardar junto al vídeo** que ya existe y añadiendo e
 código del idioma. Lo que no es opcional: el guardado ocurre **antes** de
 vaciar la columna, y si falla, el cambio de idioma no se realiza.
 
-### Insertar: el segmento nuevo rellena el hueco
+### Insertar: el segmento nuevo rellena el hueco · aplazado
 
 No hay duración por defecto. El segmento insertado toma:
 
@@ -322,7 +330,9 @@ Orden sugerido. Cada fase deja la herramienta en un estado usable.
 2. **Vista única y elección de fuente.** Quitar la puerta ver/editar y el
    endpoint `edit-mode` con ella, agrupar las fuentes, esconder las pistas de
    imagen, mover el selector de audio. Frontend más limpieza de backend.
-3. **Insertar y borrar segmentos.** Endpoints nuevos, renumeración de
+3. ~~**Insertar y borrar segmentos.**~~ **Aplazada a una versión mayor.** El
+   número se conserva para que las referencias de los planes ya escritos sigan
+   apuntando a lo mismo. Cuando llegue: endpoints nuevos, renumeración de
    `position`, regla de relleno de hueco con rechazo por solape, encaje con
    deshacer/rehacer (de sesión, sin registro en disco) y con la comprobación
    `expected` de conflicto entre pestañas. La reversión de mejora deja de
@@ -335,7 +345,11 @@ Orden sugerido. Cada fase deja la herramienta en un estado usable.
    corre el proceso, bandera de detención comprobada entre lotes, estado
    "detenido" distinto de "fallido", y retomar.
 
-Las fases 3, 4 y 5 son independientes entre sí y dependen las tres de la 2.
+Las fases 4 y 5 son independientes entre sí y dependen las dos de la 2. Ninguna
+necesita la 3, así que aplazarla no bloquea nada. Lo único que la 3 se lleva
+consigo es la retirada del botón "Revertir última mejora" cuando cambia el
+conjunto de segmentos: sin inserción ni borrado ese conjunto no cambia, y el
+botón sigue siendo correcto tal como está hoy.
 
 ## Qué queda al constructor
 

@@ -591,4 +591,6 @@ git commit -m "docs: describe the single editable view"
 
 ## Fuera de este plan
 
-Las fases 3, 4 y 5 del diseño —insertar y borrar segmentos, idioma destino, cambios en vivo y detener— llevan cada una su propio plan, escrito contra el código una vez que la fase 2 haya aterrizado. Las tres dependen de la fase 2 y son independientes entre sí.
+Las fases 4 y 5 del diseño —idioma destino, y cambios en vivo con detención— llevan cada una su propio plan, escrito contra el código una vez que la fase 2 haya aterrizado. Las dos dependen de la fase 2 y son independientes entre sí.
+
+La fase 3, insertar y borrar segmentos, **está aplazada a una versión mayor**. No la construyas ni la prepares: nada de este plan debe dejar hueco para ella. En particular, la tabla de subtítulos no lleva columna de acciones por fila, y "Revertir última mejora" se comporta hoy como siempre, porque sin inserción ni borrado el conjunto de segmentos no cambia.
