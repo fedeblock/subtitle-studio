@@ -103,7 +103,12 @@ Estas no son suposiciones; están comprobadas en el repositorio en el commit
    y es consecuencia de cómo el gateway serializa MLX. Por tanto detener solo
    puede significar "no empezar más lotes".
 8. **ASR entrega todo al final.** No hay resultados parciales que mostrar
-   mientras transcribe, y no es una operación por lotes.
+   mientras transcribe, y no es una operación por lotes. **Cierto en `4b2900a`
+   y probablemente ya falso:** hay trabajo posterior que transcribe por tramos
+   de 30 segundos con punto de control durable
+   (`transcribe_incrementally`). Donde esta restricción sostenía una decisión
+   —que detener no se ofrece durante ASR— la decisión se mantiene por coste, no
+   por imposibilidad, y queda como seguimiento.
 9. **El idioma de traducción está escrito en el prompt.**
    `mac-worker/server.py:350` fija "español de España". Cada segmento tiene una
    única columna `translated` (`backend/app/core.py:49`).
@@ -228,7 +233,11 @@ Federico pidió. Son revisables.
   hecho. El estado al detener debe distinguirse de un fallo.
 - **Detener no se ofrece durante ASR.** Por las restricciones 7 y 8: no hay
   lotes que interrumpir y no hay resultado parcial que conservar. Ofrecer un
-  botón que no puede cumplir es peor que no ofrecerlo.
+  botón que no puede cumplir es peor que no ofrecerlo. **Revisado:** la
+  transcripción por tramos con punto de control hace que detener durante ASR sea
+  posible. Sigue fuera de alcance porque retomarla toca el punto de control, y
+  ASR es la operación más larga, así que es el primer seguimiento que merece la
+  pena.
 - **Quitar el ancho máximo de 1450 px.** El usuario trabaja en una pantalla
   ancha y hoy sobran márgenes vacíos a ambos lados mientras el vídeo va
   pequeño.

@@ -1016,7 +1016,11 @@ conserva la ubicación del vídeo.
 
 Al cambiar, en este orden:
 
-1. `confirm()` con el texto exacto: `"Se guardará la traducción actual junto al vídeo y la columna quedará vacía para traducir al idioma nuevo. ¿Continuar?"` Si se cancela, el `<select>` vuelve a su valor anterior.
+1. `confirm()`, con el texto según lo que haya que perder: cuando algún
+   segmento tiene traducción, `"Se guardará la traducción actual junto al vídeo y la columna quedará vacía para traducir al idioma nuevo. ¿Continuar?"`;
+   cuando no hay ninguna, `"La traducción se hará al idioma nuevo. ¿Continuar?"`,
+   porque el primer texto describiría un guardado que no va a ocurrir. Si se
+   cancela, el `<select>` vuelve a su valor anterior.
 2. `if (busy || !(await settleEdits())) return;`
 3. `POST` al endpoint de la Tarea 13. Si responde error, `alert` con el mensaje
    y el `<select>` vuelve atrás; **nada más**.
@@ -1050,7 +1054,7 @@ las puertas: un proyecto detenido que no se puede editar sería el anti-objetivo
 del diseño cumplido al pie de la letra.
 
 **Files:**
-- Modify: `backend/app/main.py` (las cuatro comprobaciones `("ready", "failed")`), `frontend/app.js` (`stateName`, `workspaceMode`)
+- Modify: `backend/app/main.py` (todas las comprobaciones `("ready", "failed")`), `frontend/app.js` (`stateName`, `workspaceMode`), `frontend/index.html` (estilo de la insignia)
 - Test: `tests/test_api.py`, `tests/frontend.test.cjs`
 
 **Interfaces:**
@@ -1091,17 +1095,26 @@ Sustituir las cuatro comprobaciones `if ... state not in ("ready", "failed")` de
 rellena únicamente las entradas vacías; reintentar es para fallos.
 
 En el frontend, `stateName` gana `stopped: "Detenido"` y la lista de
-`workspaceMode` pasa a `["ready", "failed", "stopped"]`.
+`workspaceMode` pasa a `["ready", "failed", "stopped"]`. En `index.html`,
+`.status.stopped` necesita su propio estilo junto a las demás insignias de
+estado: sin él la biblioteca muestra el estado nuevo sin formato.
 
-- [ ] **Step 4: Ejecutar las dos suites**
+- [ ] **Step 4: Verificar que no queda ninguna puerta cerrada**
+
+Run: `grep -rn '"ready", "failed"' backend/app; grep -rn '\["ready", *"failed"\]' frontend/*.js`
+Expected: ninguna línea. El número de puertas no está fijado aquí a propósito:
+`main.py` se ha movido desde que se escribió esta tarea, y el `grep` es la
+comprobación, no el recuento.
+
+- [ ] **Step 5: Ejecutar las dos suites**
 
 Run: `npm test && .venv/bin/python -m pytest -q`
 Expected: los recuentos de antes de esta tarea más 1 en `npm test` y 4 en pytest, 0 fallos.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add backend/app/main.py frontend/app.js tests/
+git add backend/app/main.py frontend/app.js frontend/index.html tests/
 git commit -m "feat: treat a stopped project as editable, not failed"
 ```
 
@@ -1211,9 +1224,20 @@ test("the stop button says it is stopping and does not come back", () => {
 });
 ```
 
-El tercer caso es el que importa más: ASR no tiene lotes que interrumpir ni
-resultado parcial que conservar (restricciones 7 y 8), así que ofrecer el botón
-sería prometer algo que no se puede cumplir.
+El tercer caso es el que importa más, y su motivo ha cambiado. El diseño lo
+justificaba con las restricciones 7 y 8 —una inferencia nativa iniciada no se
+aborta, y ASR entrega todo al final—, pero mientras se escribía esta parte había
+trabajo en vuelo que transcribe por tramos de 30 segundos con punto de control
+durable (`transcribe_incrementally` en `backend/app/worker.py`). Con eso la
+restricción 8 deja de ser cierta y detener durante ASR pasa a ser técnicamente
+posible.
+
+**Aun así queda fuera de esta tarea.** Retomar un ASR detenido significaría
+tocar `retry_project` y el punto de control, es decir código que todavía se
+está escribiendo. Por tanto el 409 se mantiene, y su texto dice que no está
+disponible, no que sea imposible: `"Detener la transcripción todavía no está
+disponible"` para `transcribing` y `queued`, y `"No hay nada en marcha"` para el
+resto. Es un seguimiento, no un cierre.
 
 - [ ] **Step 2: Ejecutar y ver que fallan**
 
@@ -1266,7 +1290,8 @@ cuando el usuario no está editando. Lo que falta es **decir qué cambió** y
 
 ```js
 test("rows that just changed are marked, and only those", () => {
-  // primer render traduciendo, tres segmentos sin traducir
+  // primer render traduciendo, tres segmentos sin traducir:
+  //   ninguna fila lleva la clase (el mapa está vacío)
   // segundo render con el segundo segmento ya traducido →
   // sólo esa fila lleva la clase "cue-fresh", y el recuento dice "1 de 3"
   // tercer render sin cambios → ninguna fila lleva la clase
@@ -1286,6 +1311,10 @@ anterior: `translated` mientras el estado es `"translating"`, `original`
 mientras es `"improving"`. En el render siguiente, cada fila cuyo valor difiera
 del guardado recibe la clase `cue-fresh`. El mapa se reinicia al cambiar de
 proyecto y al salir de un estado activo.
+
+**Un id que no está en el mapa no es reciente.** Es la regla que decide el caso
+que más se nota: abrir un proyecto a mitad de una traducción no tiene mapa
+previo, y tratar lo ausente como cambiado encendería la tabla entera.
 
 La clase se aplica en el marcado, no después: `renderWorkspace` reconstruye
 `#project-content` con `innerHTML` en cada pasada, así que una animación CSS
