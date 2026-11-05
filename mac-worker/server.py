@@ -3,11 +3,13 @@ import json
 import pathlib
 import urllib.request
 import asyncio
+import signal
 import secrets
 import subprocess
 import anyio
 from contextlib import asynccontextmanager, suppress
 from model_runtime import ASRRuntime, MLXSession, clear_metal
+from idle_lifecycle import IdleTracker, TrackActivity
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse, FileResponse, Response, StreamingResponse
 from uuid import UUID
@@ -33,7 +35,8 @@ MODEL = os.environ.get("STUDIO_TRANSLATION_MODEL", "qwen3:14b-q8_0")
 ASR_MODEL = os.environ.get("STUDIO_ASR_MODEL", "Qwen/Qwen3-ASR-1.7B")
 
 ALIGNER_MODEL = os.environ.get("STUDIO_ALIGNER_MODEL", "Qwen/Qwen3-ForcedAligner-0.6B")
-IDLE_SECONDS = 600
+IDLE_SECONDS = int(os.environ.get("STUDIO_IDLE_SECONDS", "600"))
+activity = IdleTracker(IDLE_SECONDS)
 
 
 @asynccontextmanager
@@ -48,6 +51,9 @@ async def lifespan(app):
         while True:
             await asyncio.sleep(1)
             await asyncio.to_thread(app.state.asr.expire)
+            if os.environ.get("STUDIO_LAUNCHD_SOCKET") == "1" and activity.expired():
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
 
     task = asyncio.create_task(sweep())
     try:
@@ -60,6 +66,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title="Subtitle Studio Mac inference gateway", lifespan=lifespan)
+app.add_middleware(TrackActivity, tracker=activity)
 
 
 class ClosingStreamResponse(StreamingResponse):

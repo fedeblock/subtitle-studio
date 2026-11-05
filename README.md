@@ -14,16 +14,17 @@ bash scripts/setup.sh
 # Descarga a disco el modelo configurado; esto no lo precarga en memoria:
 ollama pull qwen3:14b-q8_0
 
-# Terminal 1: gateway nativo (mantener abierto)
-bash scripts/start-mac.sh
+# Instala una vez el gateway como servicio del usuario de macOS.
+# macOS lo activa bajo demanda y lo apaga tras 10 minutos sin actividad.
+python3 scripts/install-mac-service.py
 
-# Terminal 2: infraestructura Docker
+# Infraestructura Docker
 docker compose up -d --build --wait
 ```
 
 Abre [Subtitle Studio](http://localhost:3000). Pulsa **Abrir archivo local** y selecciona el original en el diálogo nativo de macOS. El vídeo no se copia ni se envía a servicios externos. Elige una fuente: transcribir una pista de audio concreta, un subtítulo vecino/en `Subs` o `Subtitles`, o una pista de texto incrustada. Al elegir un subtítulo se muestra la pista completa para identificarla aunque no tenga idioma; pulsa una línea para ir a ese momento y verla sobre el vídeo. La primera acción es **Ver subtítulos**, sin iniciar procesamiento para pistas existentes. Selecciona la pista de audio en **Audio del vídeo** y usa los controles del vídeo para reproducirla; el control **Volumen** ajusta esa pista. FFmpeg genera el audio localmente al vuelo, sin copiar el original. Para revisar antes de traducir, elige **Editar o mejorar**; cuando estén disponibles los segmentos, puedes editarlos o pulsar **Mejorar transcripción**, y después **Traducir pendientes**. Importar subtítulos existentes conserva sus tiempos y evita ASR; revisar sin pulsar Mejora evita también Ollama. Si eliges audio y **Ver subtítulos**, primero se transcribe y el resultado aparece en modo lectura, con opciones para editar o traducir después. Las pistas de audio elegidas se decodifican a memoria para MLX sin copiar el vídeo. Puedes previsualizar el vídeo mientras se procesa, si el navegador admite el formato. Los segmentos que ya existen se muestran en modo lectura durante la traducción y mejora; la transcripción inicial aparece al finalizar ASR. **Guardar junto al vídeo** escribe el SRT/VTT en la carpeta del original con un nombre nuevo si ya existe; **Descargar** usa el navegador. Los proyectos antiguos sin ruta original conservada solo permiten descargar. Los proyectos fallidos permiten recuperar los originales, exportar el trabajo parcial y **Reintentar pendientes**. El reintento conserva textos, tiempos y traducciones guardadas; solo traduce las entradas vacías. No usar `rq requeue` directamente: la recuperación debe pasar por la interfaz o `POST /api/projects/{id}/retry`.
 
-Para detener: `bash scripts/stop.sh` y Ctrl+C en el gateway. El script usa `docker compose stop`: conserva contenedores, base de datos, cola y medios. Ollama es independiente. Evita detener mientras se procesa un trabajo; un proceso terminado abruptamente puede requerir revisar el estado en BD/RQ antes de recuperarlo.
+Para detener los contenedores: `bash scripts/stop.sh`. El script usa `docker compose stop`: conserva contenedores, base de datos, cola y medios. El registro del gateway en launchd y Ollama son independientes. launchd conserva el puerto y arranca el gateway cuando recibe una petición; el proceso termina tras 10 minutos sin peticiones activas. Las transcripciones y reproducciones en curso no cuentan como inactividad. Para detener el servicio nativo hasta el próximo inicio de sesión, ejecuta `launchctl bootout gui/$(id -u)/com.subtitle-studio.gateway`; vuelve a iniciarlo con `python3 scripts/install-mac-service.py`. Sus registros están en `~/Library/Logs/subtitle-studio-gateway.err.log` y `subtitle-studio-gateway.out.log`. Evita detener mientras se procesa un trabajo; un proceso terminado abruptamente puede requerir revisar el estado en BD/RQ antes de recuperarlo.
 
 ## Configuración
 
@@ -53,7 +54,7 @@ La acción opcional **Mejorar transcripción** pide a Ollama corregir mayúscula
 - La primera transcripción crea `Session` y `ForcedAligner` de `mlx-qwen3-asr==0.4.4`; descarga los pesos ausentes a la caché local de Hugging Face. La agrupación de palabras en subtítulos usa el formateador de esa versión.
 - Carga, inferencia y liberación MLX ocurren en **un único hilo**. La sesión y el alineador se reutilizan. Tras **600 segundos desde el fin del último uso**, el barrido (cada segundo) elimina sus referencias, ejecuta GC y vacía la caché Metal. No interrumpe una inferencia en marcha. Los pesos siguen en disco.
 - Ollama recibe `keep_alive: "10m"` en cada generación y gestiona su descarga de memoria. Debe tener el modelo descargado previamente; no se sustituye por un servicio Docker.
-- El despliegue previsto tiene un worker RQ; el gateway serializa ASR. No activar múltiples procesos Uvicorn: duplicarían los modelos.
+- El despliegue previsto tiene un worker RQ; el gateway serializa ASR. En modo launchd el gateway se activa al recibir una conexión y se apaga tras 10 minutos sin actividad; el puerto queda reservado por macOS. No activar múltiples procesos Uvicorn: duplicarían los modelos.
 
 Referencias: [API de sesión MLX](https://github.com/moona3k/mlx-qwen3-asr/blob/v0.4.4/mlx_qwen3_asr/session.py), [agrupación SRT](https://github.com/moona3k/mlx-qwen3-asr/blob/v0.4.4/mlx_qwen3_asr/writers.py), [Ollama keep_alive](https://docs.ollama.com/api/generate).
 

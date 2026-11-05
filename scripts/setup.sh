@@ -17,4 +17,4 @@ fi
 mac-worker/.venv/bin/python -m pip install -r mac-worker/requirements.txt
 printf '\nEntorno preparado. No se han descargado pesos.\n'
 printf 'Abre Ollama y prepara el modelo configurado (por defecto: ollama pull qwen3:14b-q8_0).\n'
-printf 'Después: bash scripts/start-mac.sh y docker compose up -d --build\n'
+printf 'Después: python3 scripts/install-mac-service.py y docker compose up -d --build\n'
