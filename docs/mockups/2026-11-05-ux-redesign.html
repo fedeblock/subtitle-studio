@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Subtitle Studio · mockups del rediseño</title>
+<style>
+  :root{
+    --bg:#0c1220; --panel:#141e31; --bar:#11192a; --line:#2b3850; --line-soft:#263148;
+    --text:#e8edf7; --muted:#94a3b8; --accent:#67c3ff; --primary:#1976d2; --primary-line:#278bf0;
+    --row:#1a263b; --row-on:#203451; --row-on-line:#57b5fa;
+    --field:#0d172a; --field-line:#314057; --thead:#1b2942; --cue-on:#20314e;
+    --ok:#8be2b1; --ok-bg:#163d31; --ok-line:#25664c;
+    --font:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#070b12;color:var(--text);font-family:var(--font)}
+  .doc{max-width:1180px;margin:0 auto;padding:48px 24px 96px}
+  .doc h1{font-size:28px;letter-spacing:-.5px;margin:0 0 8px}
+  .doc .lede{color:var(--muted);font-size:14px;line-height:1.6;max-width:62ch;margin:0 0 8px}
+  .doc h2{font-size:17px;margin:56px 0 4px;letter-spacing:-.2px}
+  .doc h2 .w{color:var(--muted);font-weight:400;font-size:13px;letter-spacing:0}
+  .doc .note{color:var(--muted);font-size:13px;line-height:1.6;max-width:62ch;margin:6px 0 16px}
+  .doc .note b{color:var(--text);font-weight:600}
+  .stage{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg)}
+  .stage > .app{transform-origin:top left}
+
+  /* ---------- la aplicación ---------- */
+  .app{background:var(--bg);color:var(--text);font-family:var(--font);display:flex;flex-direction:column}
+  .app button{font:inherit;cursor:pointer;border:1px solid #344158;color:#e5efff;background:#1b2942;padding:6px 11px;border-radius:8px;font-size:13px}
+  .app button.primary{background:var(--primary);border-color:var(--primary-line)}
+  .app button.ghost{background:transparent;border-color:transparent;color:var(--muted);padding:4px 7px}
+  .app select{font:inherit;font-size:12px;background:var(--field);color:var(--text);border:1px solid var(--field-line);border-radius:7px;padding:5px 7px}
+
+  /* barra superior: 44px, una sola */
+  .topbar{height:40px;flex:0 0 40px;display:flex;align-items:center;gap:10px;padding:0 10px;background:var(--bar);border-bottom:1px solid var(--line-soft)}
+  .topbar .mark{color:var(--accent);font-size:13px;flex:0 0 auto}
+  .topbar .t{font-weight:650;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46ch}
+  .topbar .state{font-size:11.5px;color:var(--muted);white-space:nowrap;flex:0 0 auto}
+  .topbar .state.ok{color:var(--ok)}
+  .topbar .grp{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+  .burger{width:28px;height:26px;display:grid;place-items:center;border-radius:7px;border:1px solid transparent;color:var(--muted);background:transparent;cursor:pointer}
+  .burger:hover{border-color:var(--line);color:var(--text)}
+  .wordmark{font-weight:700;font-size:14px;letter-spacing:-.2px}
+  .wordmark em{font-style:normal;color:var(--accent)}
+  .local{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ok);background:var(--ok-bg);border:1px solid var(--ok-line);border-radius:20px;padding:2px 8px}
+  .local i{width:5px;height:5px;border-radius:50%;background:var(--ok);display:block}
+  .topbar .sp{margin-left:auto}
+
+  .body{flex:1;display:grid;grid-template-columns:232px minmax(0,1fr);min-height:0;position:relative}
+  .body.over .rail{position:absolute;left:0;top:0;bottom:0;width:232px;z-index:5;box-shadow:18px 0 44px -18px #000}
+  .body.collapsed{grid-template-columns:0 minmax(0,1fr)}
+
+  /* biblioteca */
+  .rail{border-right:1px solid var(--line-soft);background:var(--panel);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .rail .scroll{flex:1;overflow:auto;padding:8px}
+  .proj{display:flex;align-items:stretch;gap:0;border:1px solid var(--line);background:var(--row);border-radius:9px;margin-bottom:6px;overflow:hidden}
+  .proj.on{border-color:var(--row-on-line);background:var(--row-on)}
+  .proj .open{flex:1;min-width:0;text-align:left;border:0;background:transparent;border-radius:0;padding:9px 10px}
+  .proj .name{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .proj .st{font-size:11px;color:#9daec7;margin-top:3px}
+  .proj .st.work{color:var(--accent)}
+  .proj .x{border:0;border-left:1px solid var(--line);background:transparent;border-radius:0;color:#6d7f99;padding:0 9px;font-size:13px}
+  .proj .x:hover{background:#3a2531;color:#ffbfc7}
+  .proj .bar{height:2px;background:#2c3850;margin:0 10px 8px;border-radius:2px;overflow:hidden}
+  .proj .bar span{display:block;height:100%;background:#4eacec}
+  .rail .foot{border-top:1px solid var(--line-soft);padding:7px 9px;display:flex;gap:10px}
+  .rail .foot button{font-size:11px;padding:0;border:0;background:transparent;color:#7f8fa8}
+  .rail .foot button:hover{color:var(--text)}
+
+  /* espacio de trabajo */
+  .work{display:flex;flex-direction:column;min-width:0;min-height:0}
+
+  .split{flex:1;display:grid;grid-template-columns:minmax(0,46%) minmax(0,54%);min-height:0}
+  .left{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line-soft);padding:12px;gap:10px}
+  .frame{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+  .screen{width:100%;aspect-ratio:16/9;max-height:100%;position:relative;background:#05080e;border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+  .screen .sub{position:absolute;left:7%;right:7%;bottom:13%;text-align:center;font-weight:650;font-size:17px;line-height:1.35;text-shadow:0 1px 3px #000,0 0 6px #000;white-space:pre-line}
+  .screen .ph{color:#243247;font-size:12px;letter-spacing:.08em}
+  .vbar{display:flex;align-items:center;gap:9px;color:#9fb0c8;font-size:11px}
+  .vbar .track{flex:1;height:3px;border-radius:3px;background:#243149;position:relative}
+  .vbar .track i{position:absolute;inset:0 62% 0 0;background:#4eacec;border-radius:3px}
+  .vbar .track b{position:absolute;left:38%;top:-3px;width:9px;height:9px;border-radius:50%;background:#cfe3ff}
+  details.audio{border:1px solid var(--line);border-radius:9px;background:#101a2b}
+  details.audio>summary{list-style:none;cursor:pointer;padding:7px 10px;font-size:12px;color:#aebdd4;display:flex;align-items:center;gap:7px}
+  details.audio>summary::-webkit-details-marker{display:none}
+  details.audio>summary:before{content:"›";transform:rotate(0deg);color:#6d7f99}
+  details.audio[open]>summary:before{content:"⌄"}
+  details.audio .in{padding:0 10px 10px;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted)}
+  .actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .actions .sp{margin-left:auto}
+  .saved{font-size:11.5px;color:#94d9bd;white-space:nowrap}
+  .meta{font-size:11px;color:#7f8fa8}
+
+  /* lista de subtítulos */
+  .list{min-height:0;overflow:auto;position:relative}
+  table{width:100%;border-collapse:collapse;table-layout:fixed}
+  thead th{position:sticky;top:0;z-index:1;background:var(--thead);text-align:left;font-size:10.5px;font-weight:600;color:#a9bad2;padding:8px 8px}
+  td{padding:6px 8px;border-bottom:1px solid #222e42;vertical-align:top}
+  tr.on td{background:var(--cue-on)}
+  .n{width:34px;color:#6d7f99;font-size:11px;padding-top:12px!important}
+  .tc{width:94px}
+  .tc input{width:100%;background:var(--field);border:1px solid var(--field-line);border-radius:6px;color:#c4d9f7;font:inherit;font-size:11px;padding:5px 6px;font-variant-numeric:tabular-nums}
+  td textarea{width:100%;min-height:50px;resize:vertical;background:var(--field);border:1px solid #34425c;color:var(--text);border-radius:7px;padding:7px 8px;font:inherit;font-size:12.5px;line-height:1.45}
+  .ins{width:26px;padding-top:11px!important}
+  .ins button{border:0;background:transparent;color:#4a5b76;padding:1px 4px;border-radius:5px;font-size:13px}
+  .ins button:hover{background:#243149;color:var(--accent)}
+
+  /* elección de fuente */
+  .pick{min-height:0;overflow:auto;padding:14px}
+  .pick h3{margin:0 0 3px;font-size:14.5px}
+  .pick .sub{color:var(--muted);font-size:12px;line-height:1.55;margin:0 0 12px;max-width:58ch}
+  .cta{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .cta .chosen{font-size:12px;color:var(--muted)}
+  .grp-t{font-size:11px;color:#8fa1ba;margin:14px 0 6px;font-weight:600}
+  .grp-t:first-of-type{margin-top:0}
+  .opt{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:1px solid var(--line);background:#111a2b;border-radius:8px;padding:8px 10px;margin-bottom:5px;font-size:12.5px}
+  .opt.on{border-color:var(--row-on-line);background:var(--row-on)}
+  .opt .dot{width:11px;height:11px;border-radius:50%;border:1px solid #4a5b76;flex:0 0 11px}
+  .opt.on .dot{border-color:var(--row-on-line);background:var(--row-on-line);box-shadow:inset 0 0 0 2px var(--row-on)}
+  .opt .tag{margin-left:auto;font-size:10.5px;color:#7f8fa8}
+  .opt.asr{border-style:dashed}
+  .hidden-note{font-size:11px;color:#7f8fa8;margin:10px 0 0}
+  .prev{margin-top:16px;border-top:1px solid var(--line-soft);padding-top:12px}
+  .prev .h{font-size:12px;color:#aebdd4;margin-bottom:8px}
+  .prev .row{display:flex;gap:10px;font-size:12px;color:#c8d6ec;padding:5px 7px;border-radius:6px}
+  .prev .row:hover{background:#19243a}
+  .prev .row .t{color:#7f8fa8;font-variant-numeric:tabular-nums;flex:0 0 68px;font-size:11px}
+
+  /* apilado */
+  .split.stack{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  .split.stack .left{border-right:0;border-bottom:1px solid var(--line-soft);flex:0 0 auto}
+  .split.stack .frame{flex:0 0 auto}
+  .split.stack .screen{width:auto;height:300px;margin:0 auto}
+
+  .callout{font-size:12.5px;color:var(--muted);line-height:1.55;margin:12px 0 0;max-width:66ch}
+  .callout b{color:var(--text);font-weight:600}
+</style>
+</head>
+<body>
+<div class="doc">
+
+<h1>Subtitle Studio · mockups del rediseño</h1>
+<p class="lede">Fases 1 y 2. Paleta, tipografía y componentes son los que ya existen en <code>frontend/index.html</code>: lo que cambia es dónde está cada cosa. Pantallas estáticas, sin lógica.</p>
+<p class="lede">Dos decisiones de fondo. <b style="color:#e8edf7">Una sola banda de cromo, 40 px</b>: marca, nombre del proyecto, estado, exportación y abrir conviven en la misma fila, porque la cabecera de la aplicación y la del proyecto estaban haciendo el trabajo de una. Y <b style="color:#e8edf7">la columna izquierda contiene el visor y todos los mandos; la derecha no contiene nada más que la lista</b>, a altura completa.</p>
+<p class="lede">La biblioteca se superpone en vez de empujar, así que abrirla no encoge el trabajo, y cerrarla deja la pantalla entera para el vídeo y los subtítulos. Antes del primer segmento había unos 300 px de cromo vertical; ahora hay 40.</p>
+
+<h2>1 · Vista única, biblioteca superpuesta <span class="w">1500 × 860</span></h2>
+<p class="note">Un proyecto terminado abre <b>directamente editable</b>: no hay paso previo de «Ver subtítulos» ni botón «Editar o mejorar». La biblioteca abierta flota sobre el trabajo en vez de estrecharlo.</p>
+<div class="stage" style="height:620px">
+<div class="app" style="width:1500px;height:860px;zoom:.72">
+  <div class="topbar">
+    <button class="burger" aria-label="Ocultar biblioteca">☰</button>
+    <span class="mark">▣</span>
+    <div class="t">Slow.Horses.S06E03.mkv</div><div class="state ok">Listo</div>
+    <span class="sp"></span>
+    <span class="local"><i></i>Local</span>
+    <div class="grp"><select><option>Original</option></select><select><option>srt</option><option>vtt</option></select><button class="primary">Guardar junto al vídeo</button><button>Descargar</button></div>
+    <button>Abrir archivo local</button>
+  </div>
+  <div class="body over">
+    <aside class="rail">
+      <div class="scroll">
+        <div class="proj"><button class="open"><div class="name">28.Years.Later.2025.mp4</div><div class="st">Elige los subtítulos</div></button><button class="x" title="Quitar de la biblioteca">✕</button></div>
+        <div class="proj on"><button class="open"><div class="name">Slow.Horses.S06E03.mkv</div><div class="st">Listo</div></button><button class="x" title="Quitar de la biblioteca">✕</button></div>
+        <div class="proj"><button class="open"><div class="name">The.Quiet.2005.720p.BluRay.mp4</div><div class="st work">Mejorando texto · 34 %</div></button></div>
+        <div class="proj"><button class="open"><div class="name">TEST - local MKV</div><div class="st">Listo</div></button><button class="x" title="Quitar de la biblioteca">✕</button></div>
+        <div class="proj"><button class="open"><div class="name">The.Quiet.2005.720p.BluRay.mp4</div><div class="st">Necesita atención</div></button><button class="x" title="Quitar de la biblioteca">✕</button></div>
+      </div>
+      <div class="foot"><button>Papelera</button><button>Vaciar biblioteca</button></div>
+    </aside>
+    <main class="work">
+      <div class="split">
+        <div class="left">
+          <div class="frame"><div class="screen">
+            <div class="ph">VÍDEO</div>
+            <div class="sub">We're here to see Louisa Guy.</div>
+          </div></div>
+          <div class="vbar"><span>▶</span><span>00:10:08</span><div class="track"><i></i><b></b></div><span>00:58:41</span><span>⛶</span></div>
+          <details class="audio"><summary>Pista de audio · Pista 1 · sin idioma · eac3</summary><div class="in">Volumen <input type="range" style="flex:1"></div></details>
+          <div class="actions">
+            <button>↶ Deshacer</button><button>↷ Rehacer</button>
+            <button>Mejorar transcripción</button><button>Traducir pendientes</button>
+          </div>
+          <div class="actions" style="margin-top:auto"><span class="meta">681 segmentos · archivo original, sin copia</span><span class="sp"></span><span class="saved">Todos los cambios guardados</span></div>
+        </div>
+        <div class="list">
+          <table>
+            <colgroup><col class="n"><col class="tc"><col class="tc"><col><col></colgroup>
+            <thead><tr><th>#</th><th>mark-in</th><th>mark-out</th><th>sub original</th><th>traducción</th></tr></thead>
+            <tbody>
+              <tr><td class="n">95</td><td class="tc"><input value="00:10:06.398"></td><td class="tc"><input value="00:10:08.441"></td><td><textarea>- And thus, I'd like to focus--
+- Hi, MI5.</textarea></td><td><textarea></textarea></td></tr>
+              <tr class="on"><td class="n">96</td><td class="tc"><input value="00:10:08.442"></td><td class="tc"><input value="00:10:10.152"></td><td><textarea>We're here to see Louisa Guy.</textarea></td><td><textarea></textarea></td></tr>
+              <tr><td class="n">97</td><td class="tc"><input value="00:10:12.237"></td><td class="tc"><input value="00:10:14.156"></td><td><textarea>- Yeah, hello.
+- Need to come with us.</textarea></td><td><textarea></textarea></td></tr>
+              <tr><td class="n">98</td><td class="tc"><input value="00:10:15.032"></td><td class="tc"><input value="00:10:16.450"></td><td><textarea>Sorry, who are you?</textarea></td><td><textarea></textarea></td></tr>
+              <tr><td class="n">99</td><td class="tc"><input value="00:10:17.242"></td><td class="tc"><input value="00:10:18.343"></td><td><textarea>Wow.</textarea></td><td><textarea></textarea></td></tr>
+              <tr><td class="n">100</td><td class="tc"><input value="00:10:19.100"></td><td class="tc"><input value="00:10:21.880"></td><td><textarea>You don't remember me, do you?</textarea></td><td><textarea></textarea></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</div>
+
+<h2>2 · Biblioteca cerrada, el estado por defecto <span class="w">1500 × 860</span></h2>
+<p class="note">El botón de la izquierda de la barra la cierra del todo, y así arranca. El estado vive en <code>body.classList</code>, nunca dentro de la lista, porque <code>renderList</code> la reconstruye entera cada cuatro segundos.</p>
+<div class="stage" style="height:470px">
+<div class="app" style="width:1500px;height:650px;zoom:.72">
+  <div class="topbar">
+    <button class="burger" aria-label="Mostrar biblioteca">☰</button>
+    <span class="mark">▣</span>
+    <div class="t">Slow.Horses.S06E03.mkv</div><div class="state ok">Listo</div>
+    <span class="sp"></span>
+    <span class="local"><i></i>Local</span>
+    <div class="grp"><select><option>Original</option></select><select><option>srt</option></select><button class="primary">Guardar junto al vídeo</button><button>Descargar</button></div>
+    <button>Abrir archivo local</button>
+  </div>
+  <div class="body collapsed">
+    <aside class="rail"></aside>
+    <main class="work">
+      <div class="split">
+        <div class="left">
+          <div class="frame"><div class="screen"><div class="ph">VÍDEO</div><div class="sub">We're here to see Louisa Guy.</div></div></div>
+          <div class="vbar"><span>▶</span><span>00:10:08</span><div class="track"><i></i><b></b></div><span>00:58:41</span><span>⛶</span></div>
+          <div class="actions"><button>↶ Deshacer</button><button>↷ Rehacer</button><button>Mejorar transcripción</button><button>Traducir pendientes</button></div>
+        </div>
+        <div class="list">
+          <table>
+            <colgroup><col class="n"><col class="tc"><col class="tc"><col><col></colgroup>
+            <thead><tr><th>#</th><th>mark-in</th><th>mark-out</th><th>sub original</th><th>traducción</th></tr></thead>
+            <tbody>
+              <tr class="on"><td class="n">96</td><td class="tc"><input value="00:10:08.442"></td><td class="tc"><input value="00:10:10.152"></td><td><textarea>We're here to see Louisa Guy.</textarea></td><td><textarea></textarea></td></tr>
+              <tr><td class="n">97</td><td class="tc"><input value="00:10:12.237"></td><td class="tc"><input value="00:10:14.156"></td><td><textarea>- Yeah, hello.
+- Need to come with us.</textarea></td><td><textarea></textarea></td></tr>
+              <tr><td class="n">98</td><td class="tc"><input value="00:10:15.032"></td><td class="tc"><input value="00:10:16.450"></td><td><textarea>Sorry, who are you?</textarea></td><td><textarea></textarea></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</div>
+
+<h2>3 · Elección de fuente <span class="w">1500 × 860</span></h2>
+<p class="note">Sin desplegable de Acción. Las fuentes van <b>agrupadas por procedencia</b>, las pistas de imagen no se listan pero se cuentan, y el botón está <b>por encima</b> de la vista previa, no después de mil filas. Transcribir con ASR es una fuente más, separada porque genera en vez de importar.</p>
+<div class="stage" style="height:620px">
+<div class="app" style="width:1500px;height:860px;zoom:.72">
+  <div class="topbar">
+    <button class="burger" aria-label="Ocultar biblioteca">☰</button>
+    <span class="mark">▣</span>
+    <div class="t">28.Years.Later.2025.mp4</div><div class="state ">Elige los subtítulos</div>
+    <span class="sp"></span>
+    <span class="local"><i></i>Local</span>
+    
+    <button>Abrir archivo local</button>
+  </div>
+  <div class="body over">
+    <aside class="rail">
+      <div class="scroll">
+        <div class="proj on"><button class="open"><div class="name">28.Years.Later.2025.mp4</div><div class="st">Elige los subtítulos</div></button><button class="x">✕</button></div>
+        <div class="proj"><button class="open"><div class="name">Slow.Horses.S06E03.mkv</div><div class="st">Listo</div></button><button class="x">✕</button></div>
+        <div class="proj"><button class="open"><div class="name">TEST - local MKV</div><div class="st">Listo</div></button><button class="x">✕</button></div>
+      </div>
+      <div class="foot"><button>Papelera</button><button>Vaciar biblioteca</button></div>
+    </aside>
+    <main class="work">
+      <div class="split">
+        <div class="left">
+          <div class="frame"><div class="screen"><div class="ph">VÍDEO</div></div></div>
+          <div class="vbar"><span>▶</span><span>00:00:00</span><div class="track"><i style="inset:0 100% 0 0"></i><b style="left:0"></b></div><span>01:55:06</span><span>⛶</span></div>
+          <details class="audio" open><summary>Pista de audio · Pista 1 · und · aac</summary><div class="in">Volumen <input type="range" style="flex:1"></div></details>
+          <div class="meta">La pista elegida aquí es la que se transcribe.</div>
+        </div>
+        <div class="pick">
+          <h3>¿Qué subtítulos quieres usar?</h3>
+          <p class="sub">El vídeo se lee desde su ubicación original. No se copia ni se envía a Internet.</p>
+          <div class="cta"><button class="primary">Usar esta fuente</button><span class="chosen">Subs/English.srt</span></div>
+
+          <div class="grp-t">Pistas del vídeo</div>
+          <button class="opt"><span class="dot"></span>Pista 2 · eng · subrip<span class="tag">incrustada</span></button>
+
+          <div class="grp-t">Junto al vídeo</div>
+          <button class="opt"><span class="dot"></span>28.Years.Later.2025.en.srt</button>
+          <button class="opt"><span class="dot"></span>28.Years.Later.2025.es.srt</button>
+
+          <div class="grp-t">Carpeta de subtítulos</div>
+          <button class="opt on"><span class="dot"></span>Subs/English.srt<span class="tag">1314 líneas</span></button>
+          <button class="opt"><span class="dot"></span>Subs/Latin American.spa.srt</button>
+          <button class="opt"><span class="dot"></span>Subs/SDH.eng.HI.srt</button>
+          <button class="opt"><span class="dot"></span>Subs/European.fre.srt</button>
+
+          <div class="grp-t">Si ninguna sirve</div>
+          <button class="opt asr"><span class="dot"></span>Transcribir el audio con ASR<span class="tag">tarda</span></button>
+
+          <p class="hidden-note">2 pistas de imagen ocultas: necesitan OCR.</p>
+
+          <div class="prev">
+            <div class="h">Subs/English.srt · 1314 segmentos · pulsa una línea para ir a ese momento</div>
+            <div class="row"><span class="t">00:00:02</span><span>Pelis de Casa</span></div>
+            <div class="row"><span class="t">00:00:38</span><span>Over the hills and far away...</span></div>
+            <div class="row"><span class="t">00:00:43</span><span>...Teletubbies come to play.</span></div>
+            <div class="row"><span class="t">00:00:45</span><span>One. One.</span></div>
+            <div class="row"><span class="t">00:00:47</span><span>- Two. - Two!</span></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</div>
+
+<h2>4 · Ventana estrecha <span class="w">1024 × 860 · por debajo de 1280 px</span></h2>
+<p class="note">Una columna. El vídeo arriba con altura fija, la lista debajo ocupando el resto y desplazándose sola.</p>
+<div class="stage" style="height:640px">
+<div class="app" style="width:1024px;height:800px;zoom:.8">
+  <div class="topbar">
+    <button class="burger" aria-label="Mostrar biblioteca">☰</button>
+    <span class="mark">▣</span>
+    <div class="t">Slow.Horses.S06E03.mkv</div><div class="state ok">Listo</div>
+    <span class="sp"></span>
+    <span class="local"><i></i>Local</span>
+    <div class="grp"><select><option>Original</option></select><button class="primary">Guardar junto al vídeo</button></div>
+    <button>Abrir archivo local</button>
+  </div>
+  <div class="body collapsed">
+    <aside class="rail"></aside>
+    <main class="work">
+      <div class="split stack">
+        <div class="left">
+          <div class="frame"><div class="screen"><div class="ph">VÍDEO</div><div class="sub">We're here to see Louisa Guy.</div></div></div>
+          <div class="vbar"><span>▶</span><span>00:10:08</span><div class="track"><i></i><b></b></div><span>00:58:41</span><span>⛶</span></div>
+          <div class="actions"><button>↶ Deshacer</button><button>↷ Rehacer</button><button>Mejorar transcripción</button><span class="sp"></span><span class="saved">Guardado</span></div>
+        </div>
+        <div class="list">
+          <table>
+            <colgroup><col class="n"><col class="tc"><col class="tc"><col><col></colgroup>
+            <thead><tr><th>#</th><th>mark-in</th><th>mark-out</th><th>sub original</th><th>traducción</th></tr></thead>
+            <tbody>
+              <tr class="on"><td class="n">96</td><td class="tc"><input value="00:10:08.442"></td><td class="tc"><input value="00:10:10.152"></td><td><textarea>We're here to see Louisa Guy.</textarea></td><td><textarea></textarea></td></tr>
+              <tr><td class="n">97</td><td class="tc"><input value="00:10:12.237"></td><td class="tc"><input value="00:10:14.156"></td><td><textarea>- Yeah, hello.
+- Need to come with us.</textarea></td><td><textarea></textarea></td></tr>
+              <tr><td class="n">98</td><td class="tc"><input value="00:10:15.032"></td><td class="tc"><input value="00:10:16.450"></td><td><textarea>Sorry, who are you?</textarea></td><td><textarea></textarea></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</div>
+
+<h2>Medidas que el plan fija</h2>
+<p class="note">Banda única de cromo 40 px, sin cabecera de proyecto aparte · biblioteca superpuesta, cerrada por defecto · rejilla 46 % / 54 % a partir de 1280 px, una columna por debajo · el marco del vídeo pierde el <code>max-height:410px</code> y pasa a <code>16/9</code> a lo ancho de su columna, centrado: <b>el overlay de subtítulos se posiciona contra ese marco</b>, así que el marco no puede llenar la celda o el texto caería sobre la banda negra · la lista desplaza dentro de su celda con <code>min-height:0; overflow:auto</code>, sin <code>max-height:64vh</code> · «Quitar de biblioteca» sólo existe en la fila de la lista.</p>
+
+</div>
+</body>
+</html>
