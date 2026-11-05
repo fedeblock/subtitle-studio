@@ -142,7 +142,7 @@ function renderWorkspace() {
   const workspace = $("workspace");
   if (workspace.dataset.projectId !== p.id || !$("video")) {
     const tracks = p.audio_tracks || [];
-    workspace.innerHTML = `<div id="project-header"></div><div class="player-frame"><div class="player-video"><video id="video" class="player" controls preload="metadata" src="/api/projects/${p.id}/media"></video><div id="video-subtitles" class="video-subtitles" hidden></div></div>${tracks.length ? `<label>Audio del vídeo <select id="audio-track">${tracks.map(t => `<option value="${t.index}" ${t.index === p.audio_index ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></label> <label>Volumen <input id="audio-volume" type="range" min="0" max="1" step="0.05" value="1"></label><audio id="player-audio" hidden preload="none"></audio><div id="audio-status" class="tiny" role="status"></div>` : ""}</div><div id="media-error" class="notice error" hidden></div><div id="project-content"></div>`;
+    workspace.innerHTML = `<div class="workspace-split"><div class="workspace-left player-frame"><div class="video-center"><div id="video-frame"><video id="video" class="player" controls preload="metadata" src="/api/projects/${p.id}/media"></video><div id="video-subtitles" class="video-subtitles" hidden></div></div></div>${tracks.length ? `<div id="audio-controls"><label>Audio del vídeo <select id="audio-track">${tracks.map(t => `<option value="${t.index}" ${t.index === p.audio_index ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></label> <label>Volumen <input id="audio-volume" type="range" min="0" max="1" step="0.05" value="1"></label><audio id="player-audio" hidden preload="none"></audio><div id="audio-status" class="tiny" role="status"></div></div>` : ""}<div id="media-error" class="notice error" hidden></div><div id="workspace-controls"></div></div><div id="project-content"></div></div>`;
     workspace.dataset.projectId = p.id;
     if (tracks.length) configurePlayerAudio(p.id);
     $("video").addEventListener("timeupdate", updateVideoSubtitles);
@@ -154,8 +154,7 @@ function renderWorkspace() {
         "No se puede reproducir el original. Comprueba que sigue en su ubicación y que el navegador admite su formato. Los subtítulos se pueden editar igualmente.";
     };
   }
-  $("project-header").innerHTML =
-    `<div class="top"><div><h2>${esc(p.name)}</h2><span class="status ${esc(p.state)}">Estado: ${esc(stateName(p))}</span></div>${finished ? '<div class="group"><select id="language"><option value="es">Español</option><option value="original">Original</option></select><select id="format"><option>srt</option><option>vtt</option></select><button id="export" class="primary">Guardar junto al vídeo</button><button id="download">Descargar</button></div>' : ""}<button id="project-remove">${viewingTrash ? "Restaurar" : "Quitar de biblioteca"}</button></div>${p.error ? `<div class="notice error">${esc(p.error)} ${p.state === "failed" && !viewingTrash ? '<button id="retry">Reintentar pendientes</button>' : ""}</div>` : ""}`;
+  $("project-header").innerHTML = `<div class="project-top"><strong class="project-title" title="${esc(p.name)}">${esc(p.name)}</strong><span class="status ${esc(p.state)}">${esc(stateName(p))}</span>${finished ? '<div class="group export-group"><select id="language" aria-label="Idioma de exportación"><option value="es">Español</option><option value="original">Original</option></select><select id="format" aria-label="Formato"><option>srt</option><option>vtt</option></select><button id="export" class="primary">Guardar junto al vídeo</button><button id="download">Descargar</button></div>' : ""}</div>`;
   if (!ready) {
     cueEditor = null;
     editorProject = null;
@@ -182,8 +181,8 @@ function renderWorkspace() {
   }
   if (ready && cueEditor && !dirty.size && !pendingEdits())
     cueEditor.reconcile(cues);
-  $("project-content").innerHTML =
-    `<div class="controls"><span class="muted">${cues.length} segmentos · ${p.source_kind === "reference" ? "Archivo original, sin copia" : "Copia local existente"}</span></div>${viewMode ? `<div class="group"><button id="edit-view">Editar o mejorar</button>${cues.some(c => !(c.translated || "").trim()) ? '<button id="translate-view">Traducir pendientes</button>' : ""}</div>` : ""}${ready ? editorMarkup(cues, p) : showReadOnly ? editorMarkup(cues, p, true) : p.state === "draft" ? (viewingTrash ? '<div class="notice">Restaura el proyecto para procesarlo.</div>' : sourceChoices(p)) : '<div class="notice">Puedes previsualizar el original mientras se procesa. Durante la transcripción no hay un porcentaje de avance disponible; la primera ejecución puede necesitar descargar modelos.</div>'}`;
+  $("workspace-controls").innerHTML = `${p.error ? `<div class="notice error">${esc(p.error)} ${p.state === "failed" && !viewingTrash ? '<button id="retry">Reintentar pendientes</button>' : ""}</div>` : ""}${ready ? editorToolbar(cues, p) : showReadOnly ? editorToolbar(cues, p, true) : ""}<div class="workspace-meta">${cues.length} segmentos · ${p.source_kind === "reference" ? "Archivo original, sin copia" : "Copia local existente"}</div>`;
+  $("project-content").innerHTML = `${viewMode ? `<div class="group"><button id="edit-view">Editar o mejorar</button>${cues.some(c => !(c.translated || "").trim()) ? '<button id="translate-view">Traducir pendientes</button>' : ""}</div>` : ""}${ready ? editorTable(cues, p) : showReadOnly ? editorTable(cues, p, true) : p.state === "draft" ? (viewingTrash ? '<div class="notice">Restaura el proyecto para procesarlo.</div>' : sourceChoices(p)) : '<div class="notice">Puedes previsualizar el original mientras se procesa. Durante la transcripción no hay un porcentaje de avance disponible; la primera ejecución puede necesitar descargar modelos.</div>'}`;
   if (!viewingTrash && p.state !== "draft" && cues.length) {
     viewedCues = cues;
     updateVideoSubtitles();
@@ -193,8 +192,6 @@ function renderWorkspace() {
     if ($("translate-view")) $("translate-view").onclick = () => translatePending(p.id);
   }
   if ($("editor")) $("editor").scrollTop = oldScroll;
-  if ($("project-remove"))
-    $("project-remove").onclick = () => removeProject(p.id);
   if ($("start-project")) {
     $("start-project").onclick = () => startProject(p.id);
     $("subtitle-source").onchange = () => {
@@ -330,7 +327,7 @@ async function loadSubtitlePreview(pid) {
     updateVideoSubtitles();
     target.dataset.loadedSource = source;
     const previewCues = data.cues.map((c, i) => ({...c, id:`preview-${i}`, translated:""}));
-    target.innerHTML = `<strong>Subtítulos de esta pista · ${data.cues.length} segmentos</strong><p class="tiny">Solo lectura. Selecciona un segmento para ir a ese momento del vídeo.</p>${data.cues.length ? editorMarkup(previewCues, {action:"view",state:"ready"}, true).replace('id="editor"', 'id="preview-editor"') : "<p>No se encontraron líneas con tiempos válidos.</p>"}`;
+    target.innerHTML = `<strong>Subtítulos de esta pista · ${data.cues.length} segmentos</strong><p class="tiny">Solo lectura. Selecciona un segmento para ir a ese momento del vídeo.</p>${data.cues.length ? editorTable(previewCues, {action:"view",state:"ready"}, true).replace('id="editor"', 'id="preview-editor"') : "<p>No se encontraron líneas con tiempos válidos.</p>"}`;
     const seekPreview = (event) => {
       const row = event.target.closest?.(".cue");
       if (row && target.contains(row)) seekCue(row);
@@ -403,11 +400,14 @@ async function retryProject(pid) {
 function pendingEdits() {
   return !!cueEditor?.pending.length;
 }
-function editorMarkup(cues, project, readOnly = false) {
+function editorToolbar(cues, project, readOnly = false) {
   const toolbar = readOnly
     ? `<div class="notice">${project.action === "view" && project.state === "ready" ? "Vista de solo lectura. Puedes elegir editar o traducir cuando quieras." : "Segmentos visibles en modo lectura mientras se procesa; la edición se reactivará al terminar."}</div>`
     : `<div class="editor-toolbar"><div class="group"><button id="undo-edit" title="Deshacer (⌘Z / Ctrl+Z)">↶ Deshacer</button><button id="redo-edit" title="Rehacer (⌘⇧Z / Ctrl+Shift+Z)">↷ Rehacer</button><button id="retry-save" hidden>Reintentar guardado</button><button id="improve-text" title="Corregir puntuación y mayúsculas con Ollama">Mejorar transcripción</button>${cues.some((c) => !(c.translated || "").trim()) ? '<button id="translate-pending">Traducir pendientes</button>' : ""}${project.can_undo_improvement ? '<button id="undo-improvement">Revertir última mejora</button>' : ""}</div><span id="save-status" role="status" aria-live="polite"></span></div><p class="tiny">Guardado automático al salir de cada campo · Deshacer disponible durante esta sesión del proyecto.</p>`;
-  return `${toolbar}<div class="editor" id="editor"><table class="subtitle-table"><colgroup><col class="number-col"><col class="time-col"><col class="time-col"><col><col></colgroup><thead><tr><th scope="col">#</th><th scope="col">mark-in</th><th scope="col">mark-out</th><th scope="col">sub original (o transcripción)</th><th scope="col">traducción</th></tr></thead><tbody>${cues
+  return toolbar;
+}
+function editorTable(cues, project, readOnly = false) {
+  return `<div class="editor" id="editor"><table class="subtitle-table"><colgroup><col class="number-col"><col class="time-col"><col class="time-col"><col><col></colgroup><thead><tr><th scope="col">#</th><th scope="col">mark-in</th><th scope="col">mark-out</th><th scope="col">sub original (o transcripción)</th><th scope="col">traducción</th></tr></thead><tbody>${cues
     .map((item, i) => {
       const c = cueEditor?.get(item.id) || item;
       return `<tr class="cue" tabindex="0" data-cue="${c.id}" data-start="${c.start}" data-end="${c.end}"><td class="cue-number">${i + 1}</td><td><input aria-label="Mark-in ${i + 1}" class="start" data-field="start" ${readOnly ? "readonly" : ""} value="${time(c.start)}"></td><td><input aria-label="Mark-out ${i + 1}" class="end" data-field="end" ${readOnly ? "readonly" : ""} value="${time(c.end)}"></td><td><textarea class="original" data-field="original" ${readOnly ? "readonly" : ""} aria-label="Original ${i + 1}">${esc(c.original)}</textarea></td><td><textarea class="translated" data-field="translated" ${readOnly ? "readonly" : ""} aria-label="Traducción ${i + 1}">${esc(c.translated)}</textarea></td></tr>`;
@@ -656,6 +656,7 @@ async function resetWorkspace() {
   editorProject = null;
   selectionRevision++;
   $("workspace").innerHTML = '<div class="empty">Selecciona un proyecto.</div>';
+  $("project-header").innerHTML = "";
   return true;
 }
 async function removeProject(pid) {

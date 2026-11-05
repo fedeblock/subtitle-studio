@@ -92,6 +92,21 @@ test("collapsing the library survives a list re-render", () => {
   assert.ok(c.document.body.classList.contains('library-collapsed')); evaluate(c,'toggleLibrary();renderList()');
   assert.equal(c.document.body.classList.contains('library-collapsed'),false);
 });
+test("the workspace header no longer carries the remove button", () => {
+  const c=domSetup(); evaluate(c,"detail={project:{id:'a',name:'a.mkv',state:'ready',progress:100,source_kind:'reference'},cues:[{id:'1',start:1,end:2,original:'hi',translated:''}]};renderWorkspace();");
+  assert.equal(c.document.getElementById('project-remove'),null); assert.ok(c.document.querySelector('.workspace-split'));
+});
+test("neither the player nor the editor is capped at a fixed height", () => {
+  const css=fs.readFileSync('frontend/index.html','utf8'); assert.ok(!/max-height:\s*410px/.test(css)); assert.ok(!/max-height:\s*64vh/.test(css));
+});
+test("the right cell holds the list and nothing else", () => {
+  const c=domSetup(); evaluate(c,"detail={project:{id:'a',name:'a.mkv',state:'ready',progress:100},cues:[{id:'1',start:1,end:2,original:'hi',translated:''}]};renderWorkspace();");
+  const right=c.document.getElementById('project-content'); assert.ok(right.querySelector('#editor')); assert.equal(right.querySelector('#save-status'),null); assert.ok(c.document.getElementById('workspace-controls').querySelector('#undo-edit'));
+});
+test("nothing but the video shares the overlay's positioned ancestor", () => {
+  const c=domSetup(); evaluate(c,"detail={project:{id:'a',name:'a.mkv',state:'ready',progress:100,audio_tracks:[{index:1,label:'audio'}]},cues:[{id:'1',start:1,end:2,original:'hi',translated:''}]};renderWorkspace();");
+  const frame=c.document.getElementById('video-frame'); assert.ok(frame.querySelector('#video-subtitles')); assert.equal(frame.querySelector('#audio-controls'),null);
+});
 
 test("time formatter carries rounded milliseconds into next minute", () => {
   const c = setup();
