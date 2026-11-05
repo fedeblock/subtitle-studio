@@ -80,23 +80,6 @@ async function refresh() {
     refreshing = false;
   }
 }
-function renderList() {
-  $("projects").innerHTML = projects.length
-    ? projects
-        .map(
-          (p) =>
-            `<button class="project ${selected === p.id ? "active" : ""}" data-id="${p.id}"><div class="name">${esc(p.name)}</div><small>${esc(stateName(p))}</small><div class="progress"><span style="width:${p.progress}%"></span></div></button>`,
-        )
-        .join("")
-    : `<div class="empty">${viewingTrash ? "Papelera vacía." : "Aún no hay proyectos."}</div>`;
-  if ($("show-trash"))
-    $("show-trash").textContent = viewingTrash ? "Ver biblioteca" : "Papelera";
-  if ($("clear-library")) $("clear-library").hidden = viewingTrash;
-  if ($("restore-library")) $("restore-library").hidden = !viewingTrash;
-  document
-    .querySelectorAll(".project")
-    .forEach((b) => (b.onclick = () => select(b.dataset.id)));
-}
 async function select(pid) {
   if (busy) {
     alert("Espera a que termine el guardado.");
@@ -689,46 +672,7 @@ async function removeProject(pid) {
     await api(`/api/projects/${pid}${restoring ? "/restore" : ""}`, {
       method: restoring ? "POST" : "DELETE",
     });
-    await resetWorkspace();
-    await refresh();
-  } catch (error) {
-    alert(error.message);
-  }
-}
-async function toggleTrash() {
-  if (!(await resetWorkspace())) return;
-  viewingTrash = !viewingTrash;
-  await refresh();
-}
-async function clearLibrary() {
-  if (busy || !(await settleEdits())) return;
-  if (
-    !confirm(
-      "¿Quitar los proyectos de la biblioteca? Los archivos se conservan y los proyectos se podrán restaurar desde la papelera. Los trabajos activos permanecerán visibles.",
-    )
-  )
-    return;
-  try {
-    const result = await api("/api/library/clear", {
-      method: "POST",
-      headers: { "X-Studio-Local": "1" },
-    });
-    await resetWorkspace();
-    await refresh();
-    if (result.active)
-      alert(`${result.active} proyecto(s) siguen activos y no se quitaron.`);
-  } catch (error) {
-    alert(error.message);
-  }
-}
-async function restoreLibrary() {
-  if (busy || !(await settleEdits())) return;
-  try {
-    await api("/api/library/restore", {
-      method: "POST",
-      headers: { "X-Studio-Local": "1" },
-    });
-    await resetWorkspace();
+    if (pid === selected) await resetWorkspace();
     await refresh();
   } catch (error) {
     alert(error.message);
@@ -763,8 +707,5 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 $("open-local").onclick = openLocalFile;
-$("show-trash").onclick = toggleTrash;
-$("clear-library").onclick = clearLibrary;
-$("restore-library").onclick = restoreLibrary;
 refresh();
 setInterval(refresh, 4000);

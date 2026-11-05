@@ -393,6 +393,15 @@
       .library { display:flex; flex-direction:column; }
       .library-footer { display:flex; gap: 10px; padding: 8px; border-top: 1px solid #263148; }
       .library-footer button { border:0; background:transparent; padding:0; font-size:11px; color:#94a3b8; }
+      .layout { display:block; position:relative; }
+      .library { position:absolute; z-index:5; top:0; bottom:0; left:0; width:232px; border-radius:0; box-shadow:18px 0 44px -18px #000; }
+      .library-collapsed .library { display:none; }
+      .library .list { flex:1; max-height:none; }
+      .project { display:flex; padding:0; overflow:hidden; }
+      .project-open { min-width:0; flex:1; text-align:left; border:0; border-radius:0; background:transparent; padding:9px 10px; }
+      .project-open .name { display:block; font-size:12.5px; }
+      .project [data-action="remove"] { border:0; border-left:1px solid #2b3850; border-radius:0; background:transparent; padding:0 9px; }
+      .project .progress { display:block; height:2px; }
     </style>
   </head>
   <body>
@@ -416,5 +425,6 @@
     </div></main>
     <script src="/editor-state.js" defer></script>
     <script src="/app.js" defer></script>
+    <script src="/library.js" defer></script>
   </body>
 </html>
