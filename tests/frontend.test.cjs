@@ -33,12 +33,32 @@ function setup() {
   vm.runInContext("renderList=()=>{};renderWorkspace=()=>{};", ctx);
   return ctx;
 }
+function domSetup() {
+  const { parseHTML } = require("linkedom");
+  const document = parseHTML(fs.readFileSync("frontend/index.html", "utf8")).document;
+  const ctx = vm.createContext({
+    document, window: { addEventListener: () => {} }, console,
+    alert: () => {}, confirm: () => true, setInterval: () => {}, setTimeout: () => {},
+    fetch: async () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => [] }),
+  });
+  for (const script of document.querySelectorAll("script[src]")) {
+    const path = `frontend/${script.getAttribute("src").replace(/^\//, "")}`;
+    vm.runInContext(fs.readFileSync(path, "utf8").replace(/refresh\(\);\s*setInterval\(refresh,\s*4000\);/, ""), ctx);
+  }
+  return ctx;
+}
 const evaluate = (ctx, script) => vm.runInContext(script, ctx);
 const deferred = () => {
   let resolve;
   const promise = new Promise((r) => (resolve = r));
   return { promise, resolve };
 };
+
+test("every element app.js binds at load exists in index.html", () => {
+  const c = domSetup();
+  for (const id of ["open-local", "show-trash", "clear-library", "restore-library", "projects", "workspace"])
+    assert.ok(c.document.getElementById(id), `falta #${id}`);
+});
 
 test("time formatter carries rounded milliseconds into next minute", () => {
   const c = setup();
@@ -84,19 +104,7 @@ test("polling never replaces edits started while request was in flight", async (
 });
 
 test("preview keeps the same media element across processing updates", () => {
-  const { parseHTML } = require("linkedom");
-  const c = setup();
-  const { document } = parseHTML(
-    fs.readFileSync("frontend/index.html", "utf8"),
-  );
-  c.document = document;
-  // Restore the real renderer while retaining the API-independent harness.
-  const source = fs.readFileSync("frontend/app.js", "utf8");
-  const renderer = source.slice(
-    source.indexOf("function renderWorkspace()"),
-    source.indexOf("async function retryProject("),
-  );
-  evaluate(c, renderer);
+  const c = domSetup(), document = c.document;
   evaluate(
     c,
     "detail={project:{id:'a',name:'movie.mp4',state:'transcribing',progress:10},cues:[]};renderWorkspace();",
@@ -117,19 +125,7 @@ test("preview keeps the same media element across processing updates", () => {
 });
 
 test("draft source choices retain selection during unchanged polling", async () => {
-  const { parseHTML } = require("linkedom");
-  const c = setup();
-  c.document = parseHTML(
-    fs.readFileSync("frontend/index.html", "utf8"),
-  ).document;
-  const source = fs.readFileSync("frontend/app.js", "utf8");
-  evaluate(
-    c,
-    source.slice(
-      source.indexOf("function renderWorkspace()"),
-      source.indexOf("async function retryProject("),
-    ),
-  );
+  const c = domSetup();
   const data = {
     project: {
       id: "a",
@@ -158,19 +154,7 @@ test("draft source choices retain selection during unchanged polling", async () 
 });
 
 function editorSetup() {
-  const { parseHTML } = require("linkedom");
-  const c = setup();
-  c.document = parseHTML(
-    fs.readFileSync("frontend/index.html", "utf8"),
-  ).document;
-  const source = fs.readFileSync("frontend/app.js", "utf8");
-  evaluate(
-    c,
-    source.slice(
-      source.indexOf("function renderWorkspace()"),
-      source.indexOf("async function retryProject("),
-    ),
-  );
+  const c = domSetup();
   evaluate(
     c,
     "selected='a';detail={project:{id:'a',name:'test',state:'ready',progress:100},cues:[{id:'c1',position:0,start:0,end:2,original:'Hello',translated:''}]};renderWorkspace();",
