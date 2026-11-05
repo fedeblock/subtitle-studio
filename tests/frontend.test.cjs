@@ -42,7 +42,7 @@ function domSetup() {
     fetch: async () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => [] }),
   });
   for (const script of document.querySelectorAll("script[src]")) {
-    const path = `frontend/${script.getAttribute("src").replace(/^\//, "")}`;
+    const path = `frontend/${script.getAttribute("src").split("?")[0].replace(/^\//, "")}`;
     vm.runInContext(fs.readFileSync(path, "utf8").replace(/refresh\(\);\s*setInterval\(refresh,\s*4000\);/, ""), ctx);
   }
   return ctx;
