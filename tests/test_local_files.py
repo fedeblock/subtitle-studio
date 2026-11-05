@@ -161,6 +161,42 @@ def test_audio_tracks_are_discovered_and_selected_without_media_copy(tmp_path):
     assert video.stat().st_size == before and list(tmp_path.iterdir()) == [video]
 
 
+def test_decoding_a_subtitle_chunk_uses_requested_audio_and_time(tmp_path):
+    from array import array
+    from local_files import decode_audio_chunk
+
+    source = tmp_path / "two-tracks.mkv"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=2",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:duration=2",
+            "-map",
+            "0:a",
+            "-map",
+            "1:a",
+            "-c:a",
+            "pcm_s16le",
+            str(source),
+        ],
+        check=True,
+    )
+    before = source.stat().st_size
+    pcm = array("h", decode_audio_chunk(source, 1, 1, duration=1))
+    crossings = sum(a <= 0 < b for a, b in zip(pcm, pcm[1:]))
+    assert 15000 <= len(pcm) <= 16000
+    assert 800 < crossings < 950
+    assert source.stat().st_size == before and list(tmp_path.iterdir()) == [source]
+
+
 def test_audio_preview_is_audible_and_uses_requested_track(tmp_path):
     import subprocess
     from array import array

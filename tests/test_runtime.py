@@ -88,3 +88,20 @@ def test_asr_generates_valid_srt():
         "language": "English",
         "srt": "1\n00:00:00,200 --> 00:00:01,500\nHello world.\n",
     }
+
+
+def test_silence_detection_skips_only_very_low_amplitude_audio():
+    from model_runtime import is_silent_audio
+
+    class Audio:
+        def __init__(self, low, high):
+            self.low, self.high = low, high
+
+        def min(self):
+            return self.low
+
+        def max(self):
+            return self.high
+
+    assert is_silent_audio(Audio(0, 0))
+    assert not is_silent_audio(Audio(-0.01, 0.01))

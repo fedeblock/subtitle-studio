@@ -116,6 +116,42 @@ test("nothing but the video shares the overlay's positioned ancestor", () => {
   const c=domSetup(); evaluate(c,"detail={project:{id:'a',name:'a.mkv',state:'ready',progress:100,audio_tracks:[{index:1,label:'audio'}]},cues:[{id:'1',start:1,end:2,original:'hi',translated:''}]};renderWorkspace();");
   const frame=c.document.getElementById('video-frame'); assert.ok(frame.querySelector('#video-subtitles')); assert.equal(frame.querySelector('#audio-controls'),null);
 });
+test("workspace modes preserve editing and lock active or trashed projects", () => {
+  const c=domSetup();
+  assert.equal(evaluate(c,"workspaceMode({state:'ready',action:'view'},[{id:'1'}],false)"),'editable');
+  assert.equal(evaluate(c,"workspaceMode({state:'translating'},[{id:'1'}],false)"),'locked');
+  assert.equal(evaluate(c,"workspaceMode({state:'ready'},[{id:'1'}],true)"),'locked');
+  assert.equal(evaluate(c,"defaultExportLanguage([{translated:''}])"),'original');
+  assert.equal(evaluate(c,"defaultExportLanguage([{translated:'hola'}])"),'es');
+});
+test("subtitle sources are grouped and unsupported image tracks are counted", () => {
+  const c=domSetup(), opts=[{id:'1',kind:'embedded',label:'Pista',supported:true},{id:'2',kind:'embedded',label:'PGS',supported:false},{id:'3',kind:'file',label:'movie.en.srt',supported:true},{id:'4',kind:'file',label:'Subs/English.srt',supported:true}];
+  const result=JSON.parse(evaluate(c,`JSON.stringify(groupSources(${JSON.stringify(opts)}))`));
+  assert.deepEqual(result.groups.map(x=>x.title),['Pistas del vídeo','Junto al vídeo','Carpeta de subtítulos']);
+  assert.equal(result.hidden,1);
+});
+test("a video with only image subtitles explains OCR and offers ASR", () => {
+  const c=domSetup(); evaluate(c,"detail={project:{id:'a',name:'a.mkv',state:'draft',subtitle_options:[{id:'pgs',kind:'embedded',label:'PGS',supported:false}]},cues:[]};renderWorkspace()");
+  assert.match(c.document.getElementById('workspace').textContent,/1 pista de imagen oculta.*OCR/);
+  assert.equal(c.document.getElementById('subtitle-action'),null);
+  assert.ok(c.document.querySelector('input[value="asr"]'));
+});
+test("ASR language selection offers Romanian and sends it with the task", async () => {
+  const c=editorSetup(); evaluate(c,"detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[],subtitle_options:[]},cues:[]};renderWorkspace()");
+  const doc=c.document, input=doc.getElementById('asr-language');
+  assert.ok(input.querySelector('option[value="Romanian"]'));
+  input.querySelectorAll('option').forEach(option=>option.removeAttribute('selected'));
+  input.querySelector('option[value="Romanian"]').setAttribute('selected','');
+  const calls=[];c.api=async (url,opts)=>{calls.push([url,opts]);return opts?.method==='POST'?{id:'a'}:{project:{id:'a',name:'test',state:'queued'},cues:[]};};
+  await evaluate(c,"startProject('a')");
+  assert.equal(JSON.parse(calls[0][1].body).asr_language,'Romanian');
+});
+test("audio controls fold after subtitle segments become available", () => {
+  const c=domSetup(); evaluate(c,"detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[{index:1,label:'audio'}],subtitle_options:[]},cues:[]};renderWorkspace()");
+  assert.ok(c.document.querySelector('#audio-controls[open]'));
+  evaluate(c,"detail.project.state='ready';detail.cues=[{id:'1',start:1,end:2,original:'text',translated:''}];renderWorkspace()");
+  assert.equal(c.document.querySelector('#audio-controls[open]'),null);
+});
 
 test("time formatter carries rounded milliseconds into next minute", () => {
   const c = setup();
@@ -201,9 +237,8 @@ test("draft source choices retain selection during unchanged polling", async () 
   evaluate(c, "selected='a';detail=data;renderWorkspace();");
   const choices = c.document.getElementById("subtitle-source");
   assert.ok(choices.textContent.includes("Subs/English.srt"));
-  assert.ok(
-    choices.querySelector('option[value="pgs"]').hasAttribute("disabled"),
-  );
+  assert.equal(choices.querySelector('input[value="pgs"]'), null);
+  assert.match(choices.textContent, /OCR/);
   c.api = async (url) =>
     url === "/api/projects" ? [] : JSON.parse(JSON.stringify(data));
   await evaluate(c, "refresh()");
@@ -317,7 +352,7 @@ test("draft exposes audio tracks alongside existing subtitles", () => {
     "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[{index:2,label:'Pista 2 · eng'},{index:3,label:'Pista 3 · spa'}],subtitle_options:[{id:'s',kind:'embedded',label:'Pista texto',supported:true}]},cues:[]};renderWorkspace();",
   );
   assert.equal(c.document.querySelectorAll("#audio-track option").length, 2);
-  assert.ok(c.document.querySelector('#subtitle-source option[value="s"]'));
+  assert.ok(c.document.querySelector('#subtitle-source input[value="s"]'));
 });
 
 test("draft in trash must be restored before it can start", () => {
@@ -372,13 +407,12 @@ test("subtitle source selection shows text and ignores slower previous response"
   );
   const select = c.document.getElementById("subtitle-source");
   c.api = (url) => (url.includes("s1") ? a.promise : b.promise);
-  // LinkeDOM treats the selected option attribute as the source of select.value.
-  const options = select.querySelectorAll("option");
-  options.forEach((o) => o.removeAttribute("selected"));
-  options[2].setAttribute("selected", "");
+  const options = select.querySelectorAll("input");
+  options.forEach((o) => { o.checked = false; });
+  select.querySelector('input[value="s1"]').checked = true;
   const first = select.onchange();
-  options[2].removeAttribute("selected");
-  options[3].setAttribute("selected", "");
+  select.querySelector('input[value="s1"]').checked = false;
+  select.querySelector('input[value="s2"]').checked = true;
   const second = select.onchange();
   b.resolve({ cues: [{ start: 1, end: 2, original: "Newest track" }] });
   await second;
@@ -409,44 +443,22 @@ test("returning to same subtitle after leaving it seeks again", () => {
   assert.equal(video.currentTime, 7);
 });
 
-test("view is first and shows an entire subtitle without starting the project", async () => {
-  const c = editorSetup();
-  evaluate(
-    c,
-    "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[],subtitle_options:[{id:'s1',kind:'embedded',label:'1',supported:true}]},cues:[]};renderWorkspace();",
-  );
-  const doc = c.document,
-    source = doc.getElementById("subtitle-source"),
-    action = doc.getElementById("subtitle-action");
-  assert.equal(action.querySelector("option").value, "view");
-  source
-    .querySelectorAll("option")
-    .forEach((o) => o.removeAttribute("selected"));
-  source.querySelector('option[value="s1"]').setAttribute("selected", "");
-  const calls = [];
-  c.api = async (url, opts) => {
-    calls.push([url, opts]);
-    return {
-      cues: Array.from({ length: 12 }, (_, i) => ({
-        start: i,
-        end: i + 1,
-        original: "Line " + i,
-      })),
-    };
-  };
-  await source.onchange();
-  assert.equal(doc.querySelectorAll("#subtitle-preview .cue").length, 12);
-  await evaluate(c, "startProject('a')");
-  assert.ok(calls.every(([url, opts]) => !opts || opts.method !== "POST"));
-  assert.equal(doc.querySelectorAll("#subtitle-preview textarea.original")[11].value, "Line 11");
+test("preview displays all cues without starting a project", async () => {
+  const c=editorSetup(); evaluate(c,"detail={project:{id:'a',name:'test',state:'draft',subtitle_options:[{id:'s1',kind:'embedded',label:'1',supported:true}]},cues:[]};renderWorkspace()");
+  const doc=c.document, source=doc.getElementById('subtitle-source');
+  source.querySelector('input[value="s1"]').checked=true;
+  const calls=[]; c.api=async (url,opts)=>{calls.push([url,opts]);return {cues:Array.from({length:12},(_,i)=>({start:i,end:i+1,original:'Line '+i}))}};
+  await source.onchange(); assert.equal(doc.querySelectorAll('#subtitle-preview .cue').length,12);
+  assert.ok(calls.every(([url,opts])=>!opts || opts.method!=='POST'));
+  assert.equal(doc.querySelectorAll('#subtitle-preview textarea.original')[11].value,'Line 11');
+  assert.equal(doc.getElementById('subtitle-action'),null);
 });
 
 test("existing subtitles use the same time and text columns as the editor", async () => {
   const c = editorSetup();
   evaluate(c, "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[],subtitle_options:[{id:'s1',kind:'embedded',label:'1',supported:true}]},cues:[]};renderWorkspace();");
   const source = c.document.getElementById('subtitle-source');
-  source.querySelectorAll('option').forEach(o => o.removeAttribute('selected'));
-  source.querySelector('option[value="s1"]').setAttribute('selected','');
+  source.querySelector('input[value="s1"]').checked=true;
   c.api = async () => ({cues:[{start:2,end:3,original:'Text',translated:''}]});
   await source.onchange();
   assert.deepEqual([...c.document.querySelectorAll('#subtitle-preview th')].map(x => x.textContent), ['#','mark-in','mark-out','sub original (o transcripción)','traducción']);
@@ -487,10 +499,7 @@ test("viewing an ASR source transcribes without starting translation", async () 
     "detail={project:{id:'a',name:'test',state:'draft',audio_tracks:[],subtitle_options:[]},cues:[]};renderWorkspace();",
   );
   const source = c.document.getElementById("subtitle-source");
-  source
-    .querySelectorAll("option")
-    .forEach((o) => o.removeAttribute("selected"));
-  source.querySelector('option[value="asr"]').setAttribute("selected", "");
+  source.querySelector('input[value="asr"]').checked=true;
   const calls = [];
   c.api = async (url, opts) => {
     calls.push([url, opts]);
@@ -502,16 +511,16 @@ test("viewing an ASR source transcribes without starting translation", async () 
         };
   };
   await evaluate(c, "startProject('a')");
-  assert.equal(JSON.parse(calls[0][1].body).action, "view");
+  assert.equal(JSON.parse(calls[0][1].body).action, "edit");
 });
 
-test("completed transcription in view mode is read-only and can be edited or translated", () => {
+test("completed legacy view mode is editable and can be translated", () => {
   const c = editorSetup();
   evaluate(c, "detail={project:{id:'a',name:'test',state:'ready',action:'view'},cues:[{id:'c',start:1,end:3,original:'Hello',translated:''}]};renderWorkspace();");
   const doc = c.document;
-  assert.ok(doc.querySelector('textarea.original').hasAttribute('readonly'));
-  assert.ok(doc.getElementById('edit-view'));
-  assert.ok(doc.getElementById('translate-view'));
+  assert.equal(doc.querySelector('textarea.original').hasAttribute('readonly'), false);
+  assert.equal(doc.getElementById('edit-view'), null);
+  assert.ok(doc.getElementById('translate-pending'));
   doc.getElementById('video').currentTime = 2;
   evaluate(c, 'updateVideoSubtitles()');
   assert.equal(doc.getElementById('video-subtitles').textContent, 'Hello');
@@ -532,10 +541,7 @@ test("clicking a viewed subtitle seeks the video to its mark-in", async () => {
   );
   const doc = c.document,
     source = doc.getElementById("subtitle-source");
-  source
-    .querySelectorAll("option")
-    .forEach((o) => o.removeAttribute("selected"));
-  source.querySelector('option[value="s1"]').setAttribute("selected", "");
+  source.querySelector('input[value="s1"]').checked=true;
   c.api = async () => ({ cues: [{ start: 21.5, end: 22, original: "Text" }] });
   await source.onchange();
   const target = doc.getElementById("subtitle-preview"),
@@ -553,10 +559,7 @@ test("selected subtitle is shown on the video at its timestamps", async () => {
   );
   const doc = c.document,
     source = doc.getElementById("subtitle-source");
-  source
-    .querySelectorAll("option")
-    .forEach((o) => o.removeAttribute("selected"));
-  source.querySelector('option[value="s1"]').setAttribute("selected", "");
+  source.querySelector('input[value="s1"]').checked=true;
   c.api = async () => ({
     cues: [{ start: 3, end: 5, original: "Visible subtitle" }],
   });

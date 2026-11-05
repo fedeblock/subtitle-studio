@@ -184,6 +184,31 @@ def decode_audio(source, index):
     return result.stdout
 
 
+def decode_audio_chunk(source, index, start, duration=30):
+    args = [
+        "ffmpeg",
+        "-nostdin",
+        "-v",
+        "error",
+        "-ss",
+        str(start),
+        "-i",
+        str(source),
+        "-map",
+        f"0:{int(index)}" if index is not None else "0:a:0",
+        "-t",
+        str(duration),
+        "-f",
+        "s16le",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "pipe:1",
+    ]
+    return subprocess.run(args, capture_output=True, check=True).stdout
+
+
 def audio_preview(source, index, start, duration=30):
     result = subprocess.run(
         [

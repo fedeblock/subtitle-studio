@@ -143,6 +143,78 @@ def test_asr_edit_mode_does_not_call_translation(client, monkeypatch):
         assert db.get(Project, "edit-project").state == "ready"
 
 
+def test_incremental_asr_persists_chunks_and_resumes_without_duplicates(
+    client, monkeypatch
+):
+    import json
+    from pathlib import Path
+    from app.core import DATA, TranscriptionProgress
+
+    pid = "incremental-project"
+    folder = Path(DATA) / pid
+    folder.mkdir(parents=True)
+    (folder / "source.json").write_text(
+        json.dumps(
+            {"selected_source": "asr", "action": "edit", "asr_language": "Romanian"}
+        )
+    )
+    with SessionLocal() as db:
+        db.add(
+            Project(
+                id=pid, name="clip", filename="source.json", state="queued", created=0
+            )
+        )
+        db.commit()
+    calls = []
+
+    def first_pass(path, payload, **kwargs):
+        assert payload["language"] == "Romanian"
+        calls.append(payload["segment_start"])
+        if payload["segment_start"] == 0:
+            return {
+                "srt": "1\n00:00:01,000 --> 00:00:02,000\nFirst\n",
+                "language": "English",
+                "end_of_audio": False,
+            }
+        with SessionLocal() as db:
+            assert (
+                db.scalars(select(Cue).where(Cue.project_id == pid)).first().original
+                == "First"
+            )
+        raise RuntimeError("temporary failure")
+
+    monkeypatch.setattr(worker, "mac_post", first_pass)
+    with pytest.raises(RuntimeError):
+        worker.process_project(pid)
+    with SessionLocal() as db:
+        assert db.get(TranscriptionProgress, pid).next_start == 30
+        db.scalars(
+            select(Cue).where(Cue.project_id == pid)
+        ).first().original = "First corrected"
+        db.get(Project, pid).state = "queued"
+        db.commit()
+
+    def retry(path, payload, **kwargs):
+        assert payload["language"] == "Romanian"
+        calls.append(payload["segment_start"])
+        return {
+            "srt": "1\n00:00:31,000 --> 00:00:32,000\nSecond\n",
+            "language": "English",
+            "end_of_audio": True,
+        }
+
+    monkeypatch.setattr(worker, "mac_post", retry)
+    worker.process_project(pid)
+    with SessionLocal() as db:
+        cues = db.scalars(
+            select(Cue).where(Cue.project_id == pid).order_by(Cue.position)
+        ).all()
+        assert [c.original for c in cues] == ["First corrected", "Second"]
+        assert db.get(Project, pid).state == "ready"
+        assert db.get(TranscriptionProgress, pid).completed
+    assert calls == [0, 30, 30]
+
+
 def test_polish_preserves_times_translation_and_can_be_restored(client, monkeypatch):
     import json
     from app import main
