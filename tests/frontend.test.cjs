@@ -75,6 +75,23 @@ test("the project header shares the one chrome band", () => {
   assert.ok(header && c.document.querySelector(".topbar #project-header"));
   assert.equal(c.document.getElementById("workspace").querySelector("#project-header"), null);
 });
+test("each project carries its own remove control", () => {
+  const c=domSetup(); evaluate(c,"projects=[{id:'a',name:'a.mkv',state:'ready',progress:100}];renderList()");
+  assert.ok(c.document.querySelector('.project[data-id="a"] [data-action="remove"]'));
+});
+test("an active project offers no remove control", () => {
+  const c=domSetup(); evaluate(c,"projects=[{id:'a',name:'a.mkv',state:'translating',progress:20}];renderList()");
+  assert.equal(c.document.querySelector('.project[data-id="a"] [data-action="remove"]'),null);
+});
+test("removing a project other than the open one keeps the workspace", async () => {
+  const c=domSetup(); let reset=false; c.resetWorkspace=async()=>{reset=true;return true}; c.api=async()=>({ok:true});
+  evaluate(c,"selected='a'"); await evaluate(c,"removeProject('b')"); assert.equal(reset,false);
+});
+test("collapsing the library survives a list re-render", () => {
+  const c=domSetup(); evaluate(c,"projects=[{id:'a',name:'a.mkv',state:'ready',progress:100}];renderList()");
+  assert.ok(c.document.body.classList.contains('library-collapsed')); evaluate(c,'toggleLibrary();renderList()');
+  assert.equal(c.document.body.classList.contains('library-collapsed'),false);
+});
 
 test("time formatter carries rounded milliseconds into next minute", () => {
   const c = setup();
