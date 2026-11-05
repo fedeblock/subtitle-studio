@@ -337,11 +337,14 @@ Orden sugerido. Cada fase deja la herramienta en un estado usable.
    deshacer/rehacer (de sesión, sin registro en disco) y con la comprobación
    `expected` de conflicto entre pestañas. La reversión de mejora deja de
    ofrecerse en cuanto el conjunto de segmentos cambia.
-4. **Idioma destino.** Parametrizar el prompt del gateway, guardar el idioma en
+4. **Idioma destino.** Planificada: tareas 11 a 15 de
+   `docs/superpowers/plans/2026-11-05-ux-shell-unified-view.md`.
+   Parametrizar el prompt del gateway, guardar el idioma en
    `source.json`, selector en la interfaz, exportación y nombres de archivo.
    Guardado del idioma saliente a archivo (con `.part` si quedó incompleto)
    antes de vaciar la columna al cambiar de idioma.
-5. **Cambios en vivo y detener.** Refresco incremental de las filas mientras
+5. **Cambios en vivo y detener.** Planificada: tareas 16 a 20 del mismo plan.
+   Refresco incremental de las filas mientras
    corre el proceso, bandera de detención comprobada entre lotes, estado
    "detenido" distinto de "fallido", y retomar.
 
@@ -359,10 +362,21 @@ botón sigue siendo correcto tal como está hoy.
 - La forma de la agrupación de fuentes: lista con encabezados, pestañas, o algo
   distinto del desplegable nativo.
 - Cómo se marcan visualmente las filas que acaban de cambiar durante un proceso.
+  **Resuelto en el plan** (tarea 19): clase `cue-fresh` con animación corta,
+  aplicada en el marcado a las filas cuyo campo relevante cambió respecto al
+  render anterior, con alternativa sin movimiento.
 - El mecanismo concreto de la bandera de detención (Redis, archivo en
   `data/<UUID>/`, columna). Solo se pide que el worker la compruebe entre lotes
-  y que respete la restricción 1.
-- La lista de idiomas destino ofrecidos.
+  y que respete la restricción 1. **Resuelto en el plan** (tarea 17): un archivo
+  `data/<UUID>/stop`, comprobado antes de cada lote y borrado en los cuatro
+  caminos de encolado.
+- La lista de idiomas destino ofrecidos. **Resuelta en el plan** (Parte 2): siete
+  códigos —`es`, `en`, `pt-BR`, `fr`, `it`, `de`, `ca`— validados por separado en
+  el backend y en el gateway, porque el código acaba dentro de un nombre de
+  archivo en el disco del usuario. Los proyectos antiguos de copia se quedan en
+  `es`, con el selector deshabilitado, porque no pueden guardar la traducción
+  saliente junto al vídeo y ese guardado es obligatorio antes de vaciar la
+  columna.
 - Todo lo tipográfico y cromático, dentro del tema oscuro existente.
 
 ## Qué no se puede romper
