@@ -4,6 +4,17 @@ Transcripción, traducción a un idioma de destino, edición por segmento y expo
 
 ## Preparación y arranque
 
+### Obtener el proyecto desde npm
+
+Con Node.js 18.17 o posterior se puede preparar una copia nueva con:
+
+```bash
+npx subtitle-studio init mi-subtitle-studio
+cd mi-subtitle-studio
+```
+
+El comando solo crea archivos en un directorio nuevo; no instala servicios ni descarga modelos. A continuación se requieren macOS con Apple Silicon y Docker, y se siguen los pasos de preparación de abajo. El funcionamiento, la reproducción y el procesamiento son locales.
+
 Requisitos: macOS Apple Silicon, Docker Desktop en ejecución, Python 3.12, FFmpeg y Ollama. `setup.sh` puede instalar Python/FFmpeg con Homebrew si faltan. Se necesita espacio para vídeos y pesos; la primera descarga requiere Internet.
 
 Desde este checkout:
