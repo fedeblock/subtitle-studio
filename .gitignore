@@ -12,10 +12,17 @@ data/*
 *.vtt
 *.ass
 *.mp4
+*.avi
+*.m4v
 *.mkv
 *.mov
+*.webm
+*.mpeg
+*.mpg
 *.wav
 *.mp3
+*.m4a
+*.flac
 
 # Local model caches
 models/
