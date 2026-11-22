@@ -2,6 +2,8 @@
 
 Transcripción, traducción a un idioma de destino, edición por segmento y exportación SRT/VTT. Frontend Nginx, API FastAPI, worker RQ, PostgreSQL y Redis ejecutan en Docker. Qwen3-ASR y su alineador ejecutan con **MLX/Metal nativo en macOS**; Ollama también es nativo.
 
+Prueba la [demo interactiva de la línea de tiempo](https://fedeblock.github.io/subtitle-studio/). Es un ejemplo independiente que funciona en el navegador con datos ficticios.
+
 ## Preparación y arranque
 
 ### Obtener el proyecto desde npm
