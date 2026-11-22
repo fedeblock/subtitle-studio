@@ -16,6 +16,14 @@ class CueEditor {
   }
   reconcile(cues) {
     const fields = ["start", "end", "original", "translated"];
+    const incoming = new Map(cues.map(c => [c.id, c]));
+    if ([...this.rows].every(([id, row]) => incoming.has(id) && fields.every(f => row[f] === incoming.get(id)[f]))) {
+      for (const cue of cues) if (!this.rows.has(cue.id)) {
+        this.rows.set(cue.id, {...cue});
+        this.confirmed.set(cue.id, {...cue});
+      }
+      return;
+    }
     if (
       cues.length !== this.rows.size ||
       cues.some(

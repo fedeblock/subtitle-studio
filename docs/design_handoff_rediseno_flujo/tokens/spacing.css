@@ -1,0 +1,37 @@
+:root{
+  /* Spacing — raw values used in source (no 4/8 grid) */
+  --sp-2:2px; --sp-3:3px; --sp-4:4px; --sp-5:5px; --sp-6:6px; --sp-7:7px; --sp-8:8px;
+  --sp-9:9px; --sp-10:10px; --sp-11:11px; --sp-12:12px; --sp-14:14px; --sp-16:16px; --sp-20:20px;
+
+  /* Radii */
+  --r-2:2px;    /* list progress bar */
+  --r-3:3px;    /* scrub track */
+  --r-4:4px;    /* preview segment */
+  --r-5:5px;    /* progress */
+  --r-6:6px;    /* inputs, small summary */
+  --r-7:7px;    /* select, textarea (mockup), burger */
+  --r-8:8px;    /* buttons (mockup), popover, source option */
+  --r-9:9px;    /* project row, notice, disclosure, legacy button */
+  --r-10:10px;  /* video frame */
+  --r-12:12px;  /* pill */
+  --r-14:14px;  /* legacy panel */
+  --r-pill:20px;/* local badge */
+  --r-full:50%;
+
+  /* Elevation — only overlays cast shadows */
+  --shadow-popover:0 8px 24px #0008;
+  --shadow-rail:18px 0 44px -18px #000;
+
+  /* Layout */
+  --topbar-h:40px; /* @kind spacing */
+  --rail-w:232px; /* @kind spacing */
+  --split-left:46%; /* @kind spacing */
+  --split-right:54%; /* @kind spacing */
+  --col-num:34px; /* @kind spacing */
+  --col-time:94px; /* @kind spacing */
+  --bp-stack:1280px; /* @kind spacing */
+
+  /* Motion */
+  --ease-activity:ease-in-out; /* @kind other */
+  --dur-activity:1.5s; /* @kind other */
+}
