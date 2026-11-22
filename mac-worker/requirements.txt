@@ -1,0 +1,8 @@
+fastapi==0.115.12
+uvicorn==0.34.2
+requests==2.32.4
+ffsubsync==0.5.1
+mlx-qwen3-asr[aligner]==0.4.4
+python-dotenv==1.2.2
+
+mlx-whisper==0.4.3

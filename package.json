@@ -1,0 +1,23 @@
+{
+  "name": "subtitle-studio",
+  "version": "0.1.0",
+  "description": "Local subtitle transcription, translation and editing for macOS Apple Silicon",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/fedeblock/subtitle-studio.git" },
+  "homepage": "https://github.com/fedeblock/subtitle-studio#readme",
+  "engines": { "node": ">=18.17" },
+  "bin": { "subtitle-studio": "bin/subtitle-studio.cjs" },
+  "files": [
+    ".env.example", "docker-compose.yml", "pytest.ini", "requirements-dev.txt",
+    "backend/Dockerfile", "backend/.dockerignore", "backend/requirements.txt", "backend/app/*.py",
+    "frontend/Dockerfile", "frontend/.dockerignore", "frontend/*.conf", "frontend/*.html", "frontend/*.js",
+    "mac-worker/*.py", "mac-worker/requirements.txt", "scripts/*.py", "scripts/*.sh",
+    "bin/*.cjs", "templates/gitignore", "docs/LOCAL-FILES.md", "docs/MVP-VALIDATION.md", "tests/*.py", "tests/*.cjs"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.cjs"
+  },
+  "devDependencies": {
+    "linkedom": "0.18.12"
+  }
+}

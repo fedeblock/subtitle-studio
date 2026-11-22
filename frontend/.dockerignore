@@ -1,0 +1,17 @@
+*
+!Dockerfile
+!nginx.conf
+!index.html
+!app.js
+
+!editor-state.js
+
+!library.js
+
+!sources.js
+
+!model-ui.js
+!focus-review.js
+
+!compare-range.js
+!batch-ui.js
