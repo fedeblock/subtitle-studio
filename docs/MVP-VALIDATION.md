@@ -1,6 +1,6 @@
 # Revisión y validación del MVP
 
-Fecha: 4 de noviembre de 2026 (Europe/Madrid). Directorio: `/Users/federico/Desarrollo/subtitle-studio`. Rama de trabajo: `feature/mvp-setup`.
+Fecha: 4 de noviembre de 2026 (Europe/Madrid). Rama de trabajo: `feature/mvp-setup`.
 
 ## Git y preservación
 

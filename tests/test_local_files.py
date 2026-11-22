@@ -1,6 +1,83 @@
 import subprocess
 
 
+def test_collect_multiple_videos_and_folder_preserves_sources(tmp_path):
+    from local_files import collect_media_sources
+
+    folder = tmp_path / "season"
+    folder.mkdir()
+    nested = folder / "disc"
+    nested.mkdir()
+    first = folder / "show.s01e01.mkv"
+    second = nested / "show.s01e02.mp4"
+    other = folder / "notes.txt"
+    for path in (first, second, other):
+        path.write_text("original")
+    found = collect_media_sources([folder, first])
+    assert set(found) == {first.resolve(), second.resolve()}
+    assert all(path.read_text() == "original" for path in (first, second, other))
+
+
+def test_audio_envelope_is_measured_without_copying_source(tmp_path):
+    from local_files import audio_envelope
+
+    source = tmp_path / "audio.wav"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=1000:duration=1",
+            str(source),
+        ],
+        check=True,
+    )
+    before = source.read_bytes()
+    values = audio_envelope(source, 0, 0, 1, 10)
+    assert len(values) == 10
+    assert all(0 < value <= 1 for value in values)
+    assert source.read_bytes() == before and list(tmp_path.iterdir()) == [source]
+
+
+def test_audio_envelope_accepts_silence_from_ffmpeg(tmp_path):
+    from local_files import audio_envelope
+
+    source = tmp_path / "silence.wav"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono",
+         "-t", "1", "-c:a", "pcm_s16le", str(source)],
+        check=True,
+    )
+    assert audio_envelope(source, 0, 0, 1, 10) == [0] * 10
+
+
+def test_episode_sources_hide_other_episodes_and_recommend_matching_language(tmp_path):
+    from local_files import discover_subtitles
+
+    video = tmp_path / "Show.S01E02.mkv"
+    video.touch()
+    (tmp_path / "Show.S01E02.en.srt").write_text("a")
+    (tmp_path / "Show.S01E03.en.srt").write_text("b")
+    (tmp_path / "Subs").mkdir()
+    (tmp_path / "Subs" / "Show.1x02.es.srt").write_text("c")
+    items, _ = discover_subtitles(
+        video,
+        probe=lambda _: {
+            "streams": [
+                {"codec_type": "audio", "index": 1, "tags": {"language": "eng"}}
+            ]
+        },
+    )
+    files = {item["label"]: item for item in items}
+    assert files["Show.S01E02.en.srt"]["match"] is True
+    assert files["Show.S01E03.en.srt"]["match"] is False
+    assert files["Subs/Show.1x02.es.srt"]["match"] is True
+    assert files["Show.S01E02.en.srt"]["recommended"] is True
+
+
 def test_discover_srt_next_to_video_and_in_subs(tmp_path):
     from local_files import discover_subtitles
 
@@ -255,3 +332,14 @@ def test_audio_preview_is_audible_and_uses_requested_track(tmp_path):
     a, b = (crossings(t["index"]) for t in tracks)
     assert 750 < a < 1000 and 1500 < b < 1950
     assert list(tmp_path.iterdir()) == [video]
+
+
+def test_audio_envelope_handles_silence_and_scientific_notation(monkeypatch):
+    import local_files
+    from types import SimpleNamespace
+    local_files._cached_envelope.cache_clear()
+    monkeypatch.setattr(local_files.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stderr='lavfi.astats.Overall.RMS_level=-inf\nlavfi.astats.Overall.RMS_level=-6.0206\nlavfi.astats.Overall.RMS_level=-1e1\n'))
+    values=local_files._cached_envelope('/not-used', 1, 1, 0, 0, 1, 3)
+    assert values[0] == 0
+    assert abs(values[1] - 0.5) < .001
+    assert abs(values[2] - 10**(-0.5)) < .001

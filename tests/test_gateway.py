@@ -19,6 +19,38 @@ def test_health_requires_token_and_does_not_load_models(gateway):
     assert result.json()["idle_seconds"] == 600
 
 
+def test_multiple_selection_registers_references_without_copying_video(
+    gateway, monkeypatch, tmp_path
+):
+    source_a, source_b = tmp_path / "a.mkv", tmp_path / "b.mp4"
+    source_a.write_bytes(b"first video")
+    source_b.write_bytes(b"second video")
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setattr(server, "ROOT", data)
+    monkeypatch.setattr(server, "choose_local_paths", lambda: [source_a, source_b])
+    monkeypatch.setattr(server, "discover_subtitles", lambda source: ([], []))
+    monkeypatch.setattr(server, "discover_audio", lambda source: [])
+    response = gateway.post(
+        "/files/select-many", headers={"X-Worker-Token": server.TOKEN}
+    )
+    assert response.status_code == 200
+    entries = response.json()["projects"]
+    assert [entry["name"] for entry in entries] == ["a.mkv", "b.mp4"]
+    assert {
+        json.loads((data / entry["id"] / "source.json").read_text())["path"]
+        for entry in entries
+    } == {str(source_a), str(source_b)}
+    assert (
+        source_a.read_bytes() == b"first video"
+        and source_b.read_bytes() == b"second video"
+    )
+    assert all(
+        [file.name for file in (data / entry["id"]).iterdir()] == ["source.json"]
+        for entry in entries
+    )
+
+
 def test_chunk_transcription_passes_language_and_offset_to_runtime(
     gateway, monkeypatch, tmp_path
 ):
@@ -39,7 +71,34 @@ def test_chunk_transcription_passes_language_and_offset_to_runtime(
         headers={"X-Worker-Token": server.TOKEN},
     )
     assert response.status_code == 200
+    assert seen == [
+        (source, 30, {"audio_index": None, "language": "Romanian", "model": "qwen"})
+    ]
+
+
+def test_comparison_uses_same_source_track_and_time(gateway, monkeypatch, tmp_path):
+    source = tmp_path / "clip.mkv"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(server, "resolve_source", lambda pid: source)
+    seen = []
+    monkeypatch.setattr(
+        server.app.state.asr,
+        "compare_chunk",
+        lambda path, start, **kw: seen.append((path, start, kw))
+        or {"qwen": {"srt": "one"}, "whisper": {"srt": "two"}},
+    )
+    response = gateway.post(
+        "/compare-models",
+        json={
+            "project_id": str(uuid.uuid4()),
+            "segment_start": 30,
+            "language": "Romanian",
+        },
+        headers={"X-Worker-Token": server.TOKEN},
+    )
+    assert response.status_code == 200
     assert seen == [(source, 30, {"audio_index": None, "language": "Romanian"})]
+    assert set(response.json()["results"]) == {"qwen", "whisper"}
 
 
 def test_symlink_source_cannot_escape_data(gateway, tmp_path):
@@ -71,6 +130,130 @@ def test_translation_contract(gateway, monkeypatch):
     )
     assert result.json() == {"texts": ["Hola"]}
     assert payloads[0]["keep_alive"] == "10m"
+
+
+def test_translation_can_target_romanian(gateway, monkeypatch):
+    instructions = []
+    monkeypatch.setattr(
+        server,
+        "model_subtitles",
+        lambda texts, context, instruction: instructions.append(instruction)
+        or ["Bună"],
+    )
+    response = gateway.post(
+        "/translate",
+        json={"texts": ["Hola"], "target_language": "Romanian"},
+        headers={"X-Worker-Token": server.TOKEN},
+    )
+    assert response.json() == {"texts": ["Bună"]}
+    assert "rumano" in instructions[0].lower()
+
+
+def test_translation_uses_requested_ollama_model(gateway, monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        server,
+        "model_subtitles",
+        lambda texts, context, instruction, model=None: seen.append(model) or ["Hola"],
+    )
+    result = gateway.post(
+        "/translate",
+        headers={"X-Worker-Token": server.TOKEN},
+        json={"texts": ["Hello"], "target_language": "Spanish", "model": "chosen"},
+    )
+    assert result.status_code == 200
+    assert seen == ["chosen"]
+
+
+def test_improvement_uses_selected_installed_model(gateway, monkeypatch):
+    seen = []
+    monkeypatch.setattr(server, "ollama_models", lambda: [{"name": "chosen:latest"}])
+    monkeypatch.setattr(
+        server,
+        "model_subtitles",
+        lambda texts, context, instruction, model=None: seen.append(model)
+        or ["Hello."],
+    )
+    headers = {"X-Worker-Token": server.TOKEN}
+    response = gateway.post(
+        "/improve", headers=headers, json={"texts": ["hello"], "model": "chosen:latest"}
+    )
+    assert response.status_code == 200 and response.json()["texts"] == ["Hello."]
+    assert seen == ["chosen:latest"]
+    assert (
+        gateway.post(
+            "/improve",
+            headers=headers,
+            json={"texts": ["hello"], "model": "not-installed"},
+        ).status_code
+        == 400
+    )
+
+
+def test_compare_translations_only_uses_installed_models(gateway, monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "ollama_models",
+        lambda: [{"name": "one:latest"}, {"name": "two:latest"}],
+    )
+
+    seen = []
+
+    def run(texts, context, instruction, model=None):
+        seen.append((texts, model))
+        return [f"resultado {model}"]
+
+    monkeypatch.setattr(server, "model_subtitles", run)
+    headers = {"X-Worker-Token": server.TOKEN}
+    response = gateway.post(
+        "/compare-translations",
+        headers=headers,
+        json={
+            "text": "Hola",
+            "target_language": "Romanian",
+            "models": ["one:latest", "two:latest"],
+        },
+    )
+    assert response.status_code == 200
+    assert [x[1] for x in seen] == ["one:latest", "two:latest"]
+    assert len(response.json()["results"]) == 2
+    assert (
+        gateway.post(
+            "/compare-translations",
+            headers=headers,
+            json={
+                "text": "Hola",
+                "target_language": "Romanian",
+                "models": ["one:latest", "missing"],
+            },
+        ).status_code
+        == 400
+    )
+
+
+def test_compare_translations_range_keeps_cue_alignment(gateway, monkeypatch):
+    monkeypatch.setattr(
+        server, "ollama_models", lambda: [{"name": "one"}, {"name": "two"}]
+    )
+    monkeypatch.setattr(
+        server,
+        "model_subtitles",
+        lambda texts, context, instruction, model=None: [
+            f"{model}:{text}" for text in texts
+        ],
+    )
+    response = gateway.post(
+        "/compare-translations-range",
+        headers={"X-Worker-Token": server.TOKEN},
+        json={
+            "texts": ["Hello", "World"],
+            "target_language": "Spanish",
+            "models": ["one", "two"],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["results"][0]["texts"] == ["one:Hello", "one:World"]
+    assert response.json()["results"][1]["texts"] == ["two:Hello", "two:World"]
 
 
 def test_translation_rejects_wrong_keys(gateway, monkeypatch):
@@ -405,3 +588,25 @@ def test_stream_audio_checks_track_and_streams_from_requested_time(
         gateway.get(f"/files/{pid}/audio-stream?index=3", headers=headers).status_code
         == 400
     )
+
+
+def test_sync_uses_selected_audio_without_writing_original(gateway, monkeypatch, tmp_path):
+    source = tmp_path / 'video.mkv'
+    source.write_bytes(b'original video')
+    pid = str(uuid.uuid4())
+    monkeypatch.setattr(server, 'resolve_source', lambda value: source)
+    monkeypatch.setattr(server, 'load_reference', lambda folder: {'audio_tracks': [{'index': 1}, {'index': 3}]})
+    seen = []
+    def fake_run(args, **kwargs):
+        seen.append(args)
+        output = args[args.index('-o') + 1]
+        from pathlib import Path
+        Path(output).write_text('1\n00:00:02,000 --> 00:00:03,000\nHola\n')
+        return SimpleNamespace(returncode=0, stderr='')
+    from types import SimpleNamespace
+    monkeypatch.setattr(server.subprocess, 'run', fake_run)
+    response = gateway.post('/files/sync-subtitles', headers={'X-Worker-Token': server.TOKEN}, json={'project_id': pid, 'audio_index': 3, 'srt': '1\n00:00:01,000 --> 00:00:02,000\nHola\n'})
+    assert response.status_code == 200
+    assert '00:00:02,000' in response.json()['srt']
+    assert seen[0][seen[0].index('--reference-stream') + 1] == '0:a:1'
+    assert source.read_bytes() == b'original video'

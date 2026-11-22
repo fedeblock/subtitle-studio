@@ -1,0 +1,117 @@
+/* Subtitle Studio — colour tokens. Values lifted verbatim from frontend/index.html and docs/mockups/2026-11-05-ux-redesign.html */
+:root{
+  /* Ink / backgrounds (darkest → lightest) */
+  --ink-0:#05080e;      /* video frame */
+  --ink-1:#070b12;      /* player / doc backdrop */
+  --ink-2:#0c1220;      /* app background */
+  --ink-3:#0d172a;      /* fields */
+  --ink-4:#101a2b;      /* disclosure bg */
+  --ink-5:#111a2b;      /* source option */
+  --ink-6:#11192a;      /* top bar */
+  --ink-7:#141e31;      /* panel / library rail */
+  --ink-8:#17243a;      /* popover */
+  --ink-9:#19243a;      /* preview row hover */
+  --ink-10:#1a263b;     /* project row */
+  --ink-11:#1b2942;     /* button / table head */
+  --ink-12:#203451;     /* selected row */
+  --ink-13:#20314e;     /* active cue */
+  --ink-14:#243149;     /* track / hover chip */
+  --ink-15:#243855;     /* pill */
+  --ink-16:#27364f;     /* notice */
+  --ink-17:#2a4061;     /* button hover */
+
+  /* Lines */
+  --line-1:#222e42;     /* table rows (mockup) */
+  --line-2:#263148;     /* soft divider */
+  --line-3:#2b3850;     /* panel border */
+  --line-4:#2c3850;     /* progress track */
+  --line-5:#2d394f;     /* table rows */
+  --line-6:#314057;     /* field border */
+  --line-7:#344158;     /* button border */
+  --line-8:#34425c;     /* textarea border */
+  --line-9:#344b6a;     /* task feedback border */
+  --line-10:#405473;    /* popover border */
+  --line-11:#4a5b76;    /* radio dot ring */
+  --line-12:#4a6185;    /* preview box */
+
+  /* Text */
+  --text-1:#eff4ff;     /* field text */
+  --text-2:#e8edf7;     /* body */
+  --text-3:#e5efff;     /* button label */
+  --text-4:#d9e8ff;     /* notice */
+  --text-5:#c4d9f7;     /* timecode input */
+  --text-6:#c8d6ec;     /* preview text */
+  --text-7:#aebdd4;     /* disclosure summary */
+  --text-8:#a9bad2;     /* table head (mockup) */
+  --text-9:#9daec7;     /* project sub */
+  --text-10:#9baac2;    /* tiny / group heading */
+  --text-11:#94a3b8;    /* muted */
+  --text-12:#7f8fa8;    /* meta / tag */
+  --text-13:#6d7f99;    /* cue number / dim */
+
+  /* Blue (accent & primary) */
+  --blue-300:#67c3ff;   /* brand accent */
+  --blue-350:#57b5fa;   /* selected outline */
+  --blue-400:#4eacec;   /* progress fill */
+  --blue-420:#47a8ef;   /* native progress accent */
+  --blue-450:#278bf0;   /* primary border */
+  --blue-480:#2683d3;   /* focus outline */
+  --blue-500:#1f86ea;   /* primary hover */
+  --blue-600:#1976d2;   /* primary */
+  --blue-50:#cfe3ff;    /* scrubber knob */
+
+  /* Green — success / local */
+  --green-300:#8be2b1; --green-350:#94d9bd; --green-400:#73deb3;
+  --green-bg:#163d31; --green-line:#25664c;
+
+  /* Red — error */
+  --red-300:#ffbfc7; --red-350:#ffadb7; --red-400:#ff8495;
+  --red-bg:#4a202c; --red-hover-bg:#3a2531;
+
+  /* Semantic aliases */
+  --bg-app:var(--ink-2);
+  --bg-bar:var(--ink-6);
+  --bg-panel:var(--ink-7);
+  --bg-row:var(--ink-10);
+  --bg-row-selected:var(--ink-12);
+  --bg-cue-active:var(--ink-13);
+  --bg-field:var(--ink-3);
+  --bg-button:var(--ink-11);
+  --bg-button-hover:var(--ink-17);
+  --bg-thead:var(--ink-11);
+  --bg-popover:var(--ink-8);
+  --bg-disclosure:var(--ink-4);
+  --bg-option:var(--ink-5);
+  --bg-notice:var(--ink-16);
+  --bg-notice-error:var(--red-bg);
+  --bg-video:var(--ink-0);
+  --bg-pill:var(--ink-15);
+
+  --border-panel:var(--line-3);
+  --border-soft:var(--line-2);
+  --border-button:var(--line-7);
+  --border-field:var(--line-6);
+  --border-textarea:var(--line-8);
+  --border-popover:var(--line-10);
+  --border-selected:var(--blue-350);
+
+  --fg-body:var(--text-2);
+  --fg-button:var(--text-3);
+  --fg-field:var(--text-1);
+  --fg-timecode:var(--text-5);
+  --fg-muted:var(--text-11);
+  --fg-subtle:var(--text-12);
+  --fg-dim:var(--text-13);
+  --fg-accent:var(--blue-300);
+  --fg-success:var(--green-400);
+  --fg-saved:var(--green-350);
+  --fg-error:var(--red-400);
+  --fg-error-soft:var(--red-300);
+
+  --primary:var(--blue-600);
+  --primary-border:var(--blue-450);
+  --primary-hover:var(--blue-500);
+  --focus-ring:var(--blue-480);
+  --progress-fill:var(--blue-400);
+  --progress-track:var(--line-4);
+}

@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import wave
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import requests
 
@@ -49,17 +50,33 @@ def main():
             if self.headers.get("X-Worker-Token") != "smoke-only-token":
                 self.send_error(401)
                 return
-            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            body = json.loads(raw_body or b"{}")
             if self.path == "/transcribe":
                 assert (artifacts / body["project_id"] / "source.wav").exists()
                 response = {
                     "srt": "1\n00:00:00,000 --> 00:00:01,000\nHello world.\n",
                     "language": "English",
                 }
+            elif self.path == "/files/select-many":
+                selected = []
+                for number in (1, 2):
+                    pid = str(uuid.uuid4())
+                    source = artifacts / f"Synthetic.S01E{number:02}.mkv"
+                    source.write_bytes(b"synthetic source")
+                    folder = artifacts / pid
+                    folder.mkdir()
+                    (folder / "source.json").write_text(json.dumps({"path":str(source),"subtitles":[{"id":"sub","kind":"file","label":f"Synthetic.S01E{number:02}.en.srt","supported":True,"match":True,"recommended":True}],"audio_tracks":[]}))
+                    selected.append({"id":pid,"name":source.name,"filename":"source.json"})
+                response = {"projects":selected,"errors":[]}
+            elif self.path == "/files/subtitle":
+                response = {"srt":"1\n00:00:00,000 --> 00:00:01,000\nHello world.\n"}
             elif self.path == "/translate":
                 if fail_translation[0]:
                     fail_translation[0] = False
-                    self.send_error(503, "Simulated model outage")
+                    # A non-retryable failure exercises the explicit recovery path;
+                    # transient 503s are retried automatically by the worker.
+                    self.send_error(400, "Simulated model failure")
                     return
                 response = {"texts": ["Hola mundo." for _ in body["texts"]]}
             else:
@@ -154,9 +171,28 @@ def main():
             ]
             == "Hola, mundo editado."
         )
+        local = {"X-Studio-Local":"1"}
+        selected = requests.post(base + "/api/projects/local-many", headers=local, timeout=10)
+        selected.raise_for_status()
+        ids = [item["id"] for item in selected.json()["projects"]]
+        recipe = requests.post(base + "/api/recipes", headers=local, json={"name":"Prueba","translation_model":"mock-model"}, timeout=5)
+        recipe.raise_for_status()
+        batch = requests.post(base + "/api/batches", headers=local, json={"recipe_id":recipe.json()["id"],"project_ids":ids}, timeout=5)
+        batch.raise_for_status()
+        batch_id = batch.json()["id"]
+        for _ in range(60):
+            batch_state = requests.get(f"{base}/api/batches/{batch_id}",timeout=5).json()
+            if all(item["status"] in ("done","failed","review") for item in batch_state["items"]):
+                break
+            time.sleep(1)
+        assert all(item["status"] == "done" for item in batch_state["items"]), batch_state
+        for project_id in ids:
+            detail = requests.get(f"{base}/api/projects/{project_id}",timeout=5).json()
+            assert detail["cues"][0]["translated"] == "Hola mundo."
+            assert [p.name for p in (artifacts/project_id).iterdir()] == ["source.json"]
         print(docker("ps"), flush=True)
         print(
-            f"PASS: upload → RQ → gateway stand-in → PostgreSQL → edit → SRT/VTT; media range; DB/Redis restart. Project {pid}",
+            f"PASS: upload → RQ → gateway stand-in → PostgreSQL → edit → SRT/VTT; media range; DB/Redis restart; two-item local batch. Project {pid}",
             flush=True,
         )
     except Exception:

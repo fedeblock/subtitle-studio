@@ -12,6 +12,17 @@ const deferred = () => {
   return { promise, resolve };
 };
 
+test('new transcription cues do not erase undo history', async () => {
+  const editor = new CueEditor([cue], async (id, value) => ({id, ...value}));
+  editor.commit('c1', 'translated', 'Hola');
+  await editor.flush();
+  editor.reconcile([editor.get('c1'), {id:'c2',start:3,end:4,original:'Bye',translated:''}]);
+  assert.equal(editor.undo().id, 'c1');
+  await editor.flush();
+  assert.equal(editor.get('c1').translated, '');
+  assert.ok(editor.get('c2'));
+});
+
 test("blur commits serialize without replacing newer edits; undo and redo persist", async () => {
   assert.ok(CueEditor, "editor controller is missing");
   const gate = deferred(),
