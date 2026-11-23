@@ -1122,6 +1122,82 @@ test('one manual anchor can preview a constant shift', async () => {
   assert.equal(evaluate(c,"cueEditor.get('c1').start"),0);
 });
 
+test('global frame-rate conversion and offset preview every cue without editing', async () => {
+  const c = editorSetup(), doc = c.document;
+  evaluate(c, `detail.cues=[{id:'c1',position:0,start:10,end:12,original:'A',translated:'Uno'},{id:'c2',position:1,start:3700,end:3702,original:'B',translated:'Dos'}];cueEditor=null;renderWorkspace()`);
+  const dialog = doc.getElementById('global-sync-dialog');
+  assert.ok(doc.getElementById('global-sync-open'));
+  dialog.showModal=()=>{dialog.open=true}; dialog.close=()=>{dialog.open=false};
+  await doc.getElementById('global-sync-open').onclick();
+  doc.getElementById('sync-source-fps').value='24';
+  doc.getElementById('sync-target-fps').value='25';
+  doc.getElementById('sync-offset').value='2';
+  await doc.getElementById('global-sync-preview').onclick();
+  const proposal=evaluate(c,'syncProposal.cues');
+  assert.equal(proposal[0].new_start,11.6);
+  assert.equal(proposal[1].new_start,3554);
+  assert.equal(evaluate(c,"cueEditor.get('c1').start"),10);
+  assert.match(doc.getElementById('sync-panel').textContent,/Propuesta de sincronización/);
+  assert.equal(doc.getElementById('sync-panel').parentElement.id,'project-content');
+});
+
+test('global adjustment refuses negative times and incomplete FPS pairs', async () => {
+  const c=editorSetup(), doc=c.document, dialog=doc.getElementById('global-sync-dialog');
+  dialog.showModal=()=>{dialog.open=true}; dialog.close=()=>{dialog.open=false};
+  await doc.getElementById('global-sync-open').onclick();
+  doc.getElementById('sync-offset').value='-1';
+  await doc.getElementById('global-sync-preview').onclick();
+  assert.match(doc.getElementById('global-sync-error').textContent,/negativ/i);
+  assert.equal(evaluate(c,'syncProposal'),null);
+  doc.getElementById('sync-offset').value='0';
+  doc.getElementById('sync-source-fps').value='24';
+  await doc.getElementById('global-sync-preview').onclick();
+  assert.match(doc.getElementById('global-sync-error').textContent,/ambas/i);
+});
+
+test('global offset can be previewed, applied and undone without changing text', async () => {
+  const c=editorSetup(), doc=c.document;
+  let saved={id:'c1',position:0,start:0,end:2,original:'Hello',translated:'Hola'};
+  c.api=async (url,opts) => {
+    if (url.endsWith('/sync-apply')) {
+      const change=JSON.parse(opts.body).cues[0];
+      assert.equal(change.start,saved.start);
+      saved={...saved,start:change.new_start,end:change.new_end};
+      return {ok:true};
+    }
+    return {project:{id:'a',name:'test',state:'ready',progress:100},cues:[saved]};
+  };
+  const dialog=doc.getElementById('global-sync-dialog');
+  dialog.showModal=()=>{dialog.open=true}; dialog.close=()=>{dialog.open=false};
+  await doc.getElementById('global-sync-open').onclick();
+  doc.getElementById('sync-offset').value='2.5';
+  await doc.getElementById('global-sync-preview').onclick();
+  assert.equal(saved.start,0);
+  assert.equal(evaluate(c,'viewedCues[0].start'),2.5);
+  doc.getElementById('sync-preview-old').onclick();
+  assert.equal(evaluate(c,'viewedCues[0].start'),0);
+  await doc.getElementById('sync-apply').onclick();
+  assert.deepEqual(saved,{id:'c1',position:0,start:2.5,end:4.5,original:'Hello',translated:'Hola'});
+  await doc.getElementById('sync-undo').onclick();
+  assert.deepEqual(saved,{id:'c1',position:0,start:0,end:2,original:'Hello',translated:'Hola'});
+});
+
+test('common fractional frame rates use exact rational ratios in both directions', () => {
+  const c=setup();
+  assert.equal(evaluate(c,"exactFrameRate('23.976')"),24000/1001);
+  assert.equal(evaluate(c,"exactFrameRate('29.97')"),30000/1001);
+  assert.ok(Math.abs(evaluate(c,"exactFrameRate('23.976') / exactFrameRate('25') * 3600") - 3452.5474525474525) < 0.000001);
+  assert.ok(Math.abs(evaluate(c,"exactFrameRate('25') / exactFrameRate('23.976') * 3452.5474525474525") - 3600) < 0.000001);
+});
+
+test('ASR model panel shows detected paths and identifies Ollama separately', async () => {
+  const c=editorSetup(), doc=c.document;
+  c.api=async()=>[{id:'qwen',label:'Qwen',cached:true,bytes:1,locations:[{repo:'Qwen/asr',path:'/models/qwen'}]},{id:'whisper',label:'Whisper',cached:false,bytes:0,locations:[]}];
+  await evaluate(c,'refreshModels()');
+  assert.match(doc.getElementById('models-list').textContent,/\/models\/qwen/);
+  assert.match(doc.getElementById('models-controls').textContent,/Ollama/);
+});
+
 test('deleting an entry asks for confirmation and retains a recovery action', async () => {
   const c=editorSetup(), doc=c.document; let calls=[];
   c.api=async (url,opts)=>{calls.push([url,opts]); return opts?.method==='DELETE' ? {ok:true,undo_id:'recover'} : {project:{id:'a',name:'test',state:'ready',progress:100},cues:[]};};

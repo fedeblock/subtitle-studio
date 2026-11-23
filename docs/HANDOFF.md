@@ -2,6 +2,14 @@
 
 # Subtitle Studio — traspaso de desarrollo
 
+## Situación: 23 de noviembre de 2026
+
+- La sincronización global permite proponer un desplazamiento y una conversión entre FPS conocidos. La propuesta ocupa el panel de subtítulos junto al vídeo, puede descartarse o aplicarse, y el ajuste aplicado puede deshacerse durante la sesión si los tiempos no han cambiado. Se rechazan tiempos negativos; no se eliminan entradas ni se sobrescriben archivos originales. Revisar en distintos momentos: un cambio de FPS no implica por sí solo un cambio de duración y los montajes con cortes intermedios pueden necesitar ajustes por tramos.
+- La API del gateway informa de las rutas de modelos presentes en la caché compartida de Hugging Face; **Audio y modelos** las muestra. Los modelos de traducción y mejora se consultan y gestionan por separado con Ollama. El frontend se reconstruyó y el gateway nativo se reinició bajo demanda sin tareas ni conexiones activas. En la UI se comprobó una propuesta de desplazamiento y se descartó, sin aplicar cambios al proyecto; se verificaron también las rutas reales de los modelos.
+- La demo de línea de tiempo ajena al proyecto se retiró del árbol actual. GitHub Pages fue despublicado y su origen se configuró como `None`; se conservó el historial. Los dos HTML autocontenidos del handoff de diseño siguen sin seguimiento, pendientes de revisión de procedencia y licencias; no deben incluirse accidentalmente.
+- El paquete npm `0.1.0` es una versión anterior a estos cambios; no se ha publicado una actualización de npm en esta sesión. Sus metadatos y los commits antiguos pueden contener direcciones de correo anteriores: cambiar la configuración Git no reescribe el historial ni modifica metadatos publicados.
+- Pendiente de validación integral: probar en medios reales una conversión de FPS y un desplazamiento, con aplicación, reproducción y deshacer; comprobar comportamiento en montajes con cortes intermedios. No se ha realizado una prueba integral con inferencia real como parte de este cambio. La reversión de sincronización actual se conserva solo en la sesión. La revisión del rediseño general y demás pendientes históricos siguen requiriendo una auditoría actualizada; los recuentos y estados del apartado del 7 de noviembre no son el estado actual.
+
 ## Rediseño de flujo: trabajo en curso
 
 ### Avance del 7 de noviembre de 2026

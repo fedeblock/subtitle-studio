@@ -35,6 +35,10 @@ def model_entries(cache, asr_repo, aligner_repo):
             "bytes": sum(
                 repos[repo].size_on_disk for repo in item["repos"] if repo in repos
             ),
+            "locations": [
+                {"repo": repo, "path": str(repos[repo].repo_path)}
+                for repo in item["repos"] if repo in repos
+            ],
         }
         for key, item in catalog(asr_repo, aligner_repo).items()
     ]

@@ -38,6 +38,11 @@ def test_catalog_only_targets_the_selected_model(tmp_path):
     )
     models = model_entries(cache, "Qwen/asr", "Qwen/aligner")
     assert models[0]["bytes"] == 30 and models[0]["cached"]
+    assert models[0]["locations"] == [
+        {"repo": "Qwen/asr", "path": str(tmp_path / "qwen-asr")},
+        {"repo": "Qwen/aligner", "path": str(tmp_path / "qwen-aligner")},
+    ]
+    assert models[1]["locations"][0]["path"] == str(tmp_path / "whisper")
     assert [
         item[0]
         for item in deletion_strategies(cache, "whisper", "Qwen/asr", "Qwen/aligner")
