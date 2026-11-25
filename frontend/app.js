@@ -88,7 +88,7 @@ async function refresh() {
       else persistRoute("library");
     }
     if (typeof auxRoute !== 'undefined' && auxRoute === 'queue' && typeof refreshBatchQueue === 'function') void refreshBatchQueue();
-    if (selected && !$('translation-dialog')?.open && !document.querySelector?.('.cue-translate[open]') && !busy && !pendingEdits() && dirty.size === 0 && (typeof focusSession === 'undefined' || !focusSession)) {
+    if (selected && !$('translation-dialog')?.open && !$('global-sync-dialog')?.open && !syncProposal && !document.querySelector?.('.cue-translate[open]') && !busy && !pendingEdits() && dirty.size === 0 && (typeof focusSession === 'undefined' || !focusSession)) {
       const pid = selected,
         revision = selectionRevision,
         edits = editRevision;
@@ -97,6 +97,8 @@ async function refresh() {
         selected !== pid ||
         revision !== selectionRevision ||
         edits !== editRevision ||
+        $('global-sync-dialog')?.open ||
+        syncProposal ||
         pendingEdits() ||
         busy ||
         (typeof focusSession !== 'undefined' && focusSession) ||
@@ -391,7 +393,7 @@ function renderWorkspace() {
     cueEditor.reconcile(cues);
   $('global-editor-bar').innerHTML = canTranslateCue ? `<div class="history-actions" role="group" aria-label="Historial de edición"><button id="undo-edit" title="Deshacer (⌘Z / Ctrl+Z)">↶ Deshacer</button><button id="redo-edit" title="Rehacer (⌘⇧Z / Ctrl+Shift+Z)">↷ Rehacer</button><button id="retry-save" hidden>Reintentar guardado</button></div>${ready ? editorToolbar(cues, p) : ''}<span id="save-status" role="status" aria-live="polite"></span>` : '';
   $('global-editor-bar').hidden = !canTranslateCue;
-  $("workspace-controls").innerHTML = `<div id="stage-panel">${stagePanel(p, cues)}</div><div id="task-progress"></div>${p.error ? `<div class="notice error">${esc(p.error)} ${p.state === "failed" && !viewingTrash && !p.error.startsWith('Mejora incompleta:') ? '<button id="retry">Reintentar pendientes</button>' : ""}</div>` : ""}${p.timing_warnings?.length ? `<div class="notice">Revisa el texto y los tiempos aproximados en ${p.timing_warnings.length} tramo(s): ${p.timing_warnings.slice(0, 6).map(t => time(t)).join(', ')}${p.timing_warnings.length > 6 ? '…' : ''}. El modelo no pudo alinearlos y podría haber interpretado sonidos como voz.</div>` : ''}${!ready && showReadOnly ? editorToolbar(cues, p, true) : ""}<div id="sync-panel"></div>${p.batch?.status === 'review' && !viewingTrash ? '<button id="continue-batch" class="primary">Continuar lote</button>' : ''}${!ready && !viewingTrash && p.source_kind === "reference" && ["ready", "failed", "cancelled"].includes(p.state) && (p.state === "ready" || p.state === "cancelled" || cues.length) ? '<button id="retranscribe">Volver a transcribir</button>' : ''}`;
+  $("workspace-controls").innerHTML = `<div id="stage-panel">${stagePanel(p, cues)}</div><div id="task-progress"></div>${p.error ? `<div class="notice error">${esc(p.error)} ${p.state === "failed" && !viewingTrash && !p.error.startsWith('Mejora incompleta:') ? '<button id="retry">Reintentar pendientes</button>' : ""}</div>` : ""}${p.timing_warnings?.length ? `<div class="notice">Revisa el texto y los tiempos aproximados en ${p.timing_warnings.length} tramo(s): ${p.timing_warnings.slice(0, 6).map(t => time(t)).join(', ')}${p.timing_warnings.length > 6 ? '…' : ''}. El modelo no pudo alinearlos y podría haber interpretado sonidos como voz.</div>` : ''}${!ready && showReadOnly ? editorToolbar(cues, p, true) : ""}${ready ? globalSyncDialogMarkup() : ''}${p.batch?.status === 'review' && !viewingTrash ? '<button id="continue-batch" class="primary">Continuar lote</button>' : ''}${!ready && !viewingTrash && p.source_kind === "reference" && ["ready", "failed", "cancelled"].includes(p.state) && (p.state === "ready" || p.state === "cancelled" || cues.length) ? '<button id="retranscribe">Volver a transcribir</button>' : ''}`;
   if (!cues.length && !viewingTrash && typeof lastComparisonUndo !== 'undefined' && lastComparisonUndo?.pid === p.id) {
     $('workspace-controls').insertAdjacentHTML('beforeend', '<button id="undo-empty-delete" type="button">Deshacer última operación</button>');
     $('undo-empty-delete').onclick = () => undoLastComparison(p.id);
@@ -400,7 +402,7 @@ function renderWorkspace() {
   if (voiceWindow?.amplitudes) paintVoiceMap();
   const filteredCues = cues.filter(c => cueFilter === "all" || cueFilter === "sus" && c.flag && !c.flag_resolved || cueFilter === "untr" && !(c.translated || "").trim() || cueFilter === "prop" && c.proposal);
   const filterBar = cues.length ? cueFilters(cues) + `<div class="cue-search"><label>Buscar <input id="cue-search" type="search" placeholder="Buscar en original o traducción" value="${esc(editorSearch)}"></label></div>` : "";
-  $("project-content").innerHTML = `${ready ? filterBar + editorTable(filteredCues, p) : showReadOnly ? filterBar + editorTable(filteredCues, p, true) : p.state === "draft" ? (viewingTrash ? '<div class="notice">Restaura el proyecto para procesarlo.</div>' : sourceChoices(p)) : p.state === "failed" ? '<div class="notice">La transcripción se detuvo. Puedes reintentar desde el último tramo guardado.</div>' : ['paused','cancelled'].includes(p.state) ? '<div class="notice">Los tramos procesados se han conservado.</div>' : '<div class="notice">Los segmentos aparecerán a medida que avance la transcripción. La primera ejecución puede necesitar descargar modelos.</div>'}`;
+  $("project-content").innerHTML = `<div id="sync-panel" hidden></div><div id="workspace-subtitles">${ready ? filterBar + editorTable(filteredCues, p) : showReadOnly ? filterBar + editorTable(filteredCues, p, true) : p.state === "draft" ? (viewingTrash ? '<div class="notice">Restaura el proyecto para procesarlo.</div>' : sourceChoices(p)) : p.state === "failed" ? '<div class="notice">La transcripción se detuvo. Puedes reintentar desde el último tramo guardado.</div>' : ['paused','cancelled'].includes(p.state) ? '<div class="notice">Los tramos procesados se han conservado.</div>' : '<div class="notice">Los segmentos aparecerán a medida que avance la transcripción. La primera ejecución puede necesitar descargar modelos.</div>'}</div>`;
   if (ready && inspectorCue && cues.some(c => c.id === inspectorCue)) drawCueInspector();
   else if ($('cue-inspector')) $('cue-inspector').innerHTML = ready ? '<p class="inspector-hint">Selecciona una entrada para editarla junto al vídeo.</p>' : '';
   if ($('cue-search')) {
@@ -421,6 +423,9 @@ function renderWorkspace() {
   if ($('stage-next-translate')) $('stage-next-translate').onclick = async () => { if (!(await settleEdits())) return; currentStage = 'translate'; cueFilter = 'all'; renderWorkspace(); };
   if ($('open-translation-dialog')) $('open-translation-dialog').onclick = () => $('translation-dialog').showModal();
   if ($('close-translation-dialog')) $('close-translation-dialog').onclick = () => $('translation-dialog').close();
+  if ($('global-sync-open')) $('global-sync-open').onclick = async () => { if (!busy && await settleEdits()) { $('project-operations').open = false; $('global-sync-dialog').showModal(); } };
+  if ($('global-sync-close')) $('global-sync-close').onclick = () => $('global-sync-dialog').close();
+  if ($('global-sync-preview')) $('global-sync-preview').onclick = previewGlobalAlignment;
   if ($('translation-language')) {
     if (translationDraft?.pid !== p.id) translationDraft = {pid:p.id, language:p.translation_language_known ? p.target_language : '', model:p.translation_model || ''};
     $('translation-language').onchange = () => {
@@ -447,7 +452,7 @@ function renderWorkspace() {
   if ($('sync-start')) $('sync-start').onclick = () => proposeSync(p.id);
   if ($('sync-undo')) $('sync-undo').onclick = () => applySync(p.id, syncUndo.cues, true);
   renderSyncPanel(p.id);
-  if (!viewingTrash && p.state !== "draft" && cues.length) {
+  if (!viewingTrash && p.state !== "draft" && cues.length && !syncProposal) {
     viewedCues = cues;
     updateVideoSubtitles();
   }
@@ -1025,21 +1030,52 @@ async function retryProject(pid) {
 function pendingEdits() {
   return !!cueEditor?.pending.length;
 }
+function globalSyncDialogMarkup() {
+  return `<dialog id="global-sync-dialog" class="preferences-dialog global-sync-dialog" aria-labelledby="global-sync-title"><div class="preferences-heading"><strong id="global-sync-title">Ajustar tiempos globalmente</strong><button id="global-sync-close" type="button" aria-label="Cerrar">✕</button></div><p>Usa un desplazamiento si todos los subtítulos llegan igual de pronto o tarde. Si fueron preparados para otra velocidad, indica ambas tasas.</p><div class="global-sync-fields"><label>FPS de los subtítulos <input id="sync-source-fps" type="number" min="1" max="240" step="any" list="sync-fps-presets" placeholder="Sin cambio"></label><label>FPS del vídeo <input id="sync-target-fps" type="number" min="1" max="240" step="any" list="sync-fps-presets" placeholder="Sin cambio"></label><datalist id="sync-fps-presets"><option value="23.976"><option value="24"><option value="25"><option value="29.97"><option value="30"><option value="50"><option value="59.94"><option value="60"></datalist><label>Desplazamiento en segundos <input id="sync-offset" type="number" step="any" value="0"></label></div><p class="tiny">Positivo: más tarde. Negativo: antes. El desplazamiento se aplica después de la conversión. El cambio de FPS solo es apropiado si la duración de las versiones realmente difiere.</p><p id="global-sync-error" role="alert"></p><button id="global-sync-preview" class="primary" type="button">Previsualizar ajuste</button></dialog>`;
+}
+function exactFrameRate(value) {
+  const rate = Number(value);
+  if (rate === 23.976) return 24000 / 1001;
+  if (rate === 29.97) return 30000 / 1001;
+  if (rate === 59.94) return 60000 / 1001;
+  return rate;
+}
+async function previewGlobalAlignment() {
+  if (busy || !(await settleEdits())) return;
+  const source = $('sync-source-fps').value.trim(), target = $('sync-target-fps').value.trim();
+  const offsetInput = $('sync-offset').value.trim(), offset = Number(offsetInput);
+  const error = $('global-sync-error');
+  if (!!source !== !!target) { error.textContent = 'Indica ambas tasas de FPS o deja las dos vacías.'; return; }
+  const sourceFps = source ? exactFrameRate(source) : 1, targetFps = target ? exactFrameRate(target) : 1;
+  if (!Number.isFinite(sourceFps) || !Number.isFinite(targetFps) || sourceFps < 1 || targetFps < 1 || sourceFps > 240 || targetFps > 240 || !offsetInput || !Number.isFinite(offset)) { error.textContent = 'Introduce FPS válidos y un desplazamiento numérico.'; return; }
+  const scale = sourceFps / targetFps;
+  const proposal = detail.cues.map(item => cueEditor.get(item.id)).map(item => ({id:item.id,start:item.start,end:item.end,new_start:item.start * scale + offset,new_end:item.end * scale + offset}));
+  if (proposal.some(item => !Number.isFinite(item.new_start) || !Number.isFinite(item.new_end) || item.new_start < 0 || item.new_end <= item.new_start)) { error.textContent = 'El ajuste produciría tiempos negativos o inválidos. Cambia los valores antes de continuar.'; return; }
+  const rateLabel = source ? `${source} → ${target} FPS` : 'sin cambio de FPS';
+  syncProposal = {pid:detail.project.id, cues:proposal, useNew:true, trackLabel:`${rateLabel}; desplazamiento ${offset > 0 ? '+' : ''}${offset} s`};
+  $('global-sync-dialog').close();
+  renderSyncPanel(detail.project.id);
+}
 function renderSyncPanel(pid) {
   const panel = $('sync-panel');
   if (!panel || !syncProposal || syncProposal.pid !== pid) return;
   const entries = syncProposal.cues;
-  panel.innerHTML = `<div class="notice"><strong>Propuesta de sincronización · ${entries.length} segmentos</strong><p>Referencia: ${esc(syncProposal.trackLabel)}. Comprueba varios momentos. La detección de voz puede equivocarse y no modifica el archivo original.</p><div class="group"><button id="sync-preview-old">Ver tiempos actuales</button> <button id="sync-preview-new">Ver propuesta</button> <button id="sync-apply" class="primary">Aplicar propuesta</button> <button id="sync-discard">Descartar</button></div><div class="sync-list">${entries.map((c, i) => `<button type="button" data-sync-index="${i}">${i + 1} · ${time(c.start)}–${time(c.end)} → ${time(c.new_start)}–${time(c.new_end)} · ${esc(detail.cues[i]?.original || '')}</button>`).join('')}</div></div>`;
+  panel.hidden = false;
+  if ($('workspace-subtitles')) $('workspace-subtitles').hidden = true;
+  panel.innerHTML = `<div class="sync-proposal"><strong>Propuesta de sincronización · ${entries.length} segmentos</strong><p>Referencia: ${esc(syncProposal.trackLabel)}. Comprueba varios momentos en el vídeo. El archivo original no se modifica.</p><div class="group"><button id="sync-preview-old">Ver tiempos actuales</button> <button id="sync-preview-new">Ver propuesta</button> <button id="sync-apply" class="primary">Aplicar propuesta</button> <button id="sync-discard">Descartar</button></div><p class="tiny">Elige una entrada para ir a su tiempo seleccionado en el vídeo.</p><div class="sync-list">${entries.map((c, i) => `<button type="button" data-sync-index="${i}">${i + 1} · ${time(c.start)}–${time(c.end)} → ${time(c.new_start)}–${time(c.new_end)} · ${esc(detail.cues[i]?.original || '')}</button>`).join('')}</div></div>`;
   const preview = useNew => {
     syncProposal.useNew = useNew;
+    $('sync-preview-old').setAttribute('aria-pressed', String(!useNew));
+    $('sync-preview-new').setAttribute('aria-pressed', String(useNew));
     viewedCues = detail.cues.map((c, i) => ({...c, start: useNew ? entries[i].new_start : entries[i].start, end: useNew ? entries[i].new_end : entries[i].end}));
     updateVideoSubtitles();
   };
   $('sync-preview-old').onclick = () => preview(false);
   $('sync-preview-new').onclick = () => preview(true);
   $('sync-apply').onclick = () => applySync(pid, entries, false);
-  $('sync-discard').onclick = () => { syncProposal = null; viewedCues = detail.cues; updateVideoSubtitles(); panel.innerHTML = ''; };
+  $('sync-discard').onclick = () => { syncProposal = null; viewedCues = detail.cues; updateVideoSubtitles(); panel.innerHTML = ''; panel.hidden = true; if ($('workspace-subtitles')) $('workspace-subtitles').hidden = false; };
   panel.querySelectorAll('[data-sync-index]').forEach(button => button.onclick = () => { const c = entries[Number(button.dataset.syncIndex)]; $('video').currentTime = syncProposal.useNew ? c.new_start : c.start; });
+  preview(syncProposal.useNew);
 }
 
 async function proposeSync(pid) {
@@ -1048,12 +1084,14 @@ async function proposeSync(pid) {
   if (!track) return;
   busy = syncRunning = true;
   const panel = $('sync-panel');
+  panel.hidden = false;
+  if ($('workspace-subtitles')) $('workspace-subtitles').hidden = true;
   panel.innerHTML = '<div class="notice" role="status">Analizando la pista de audio y los subtítulos… Puede tardar varios minutos.</div>';
   try {
     const result = await api(`/api/projects/${pid}/sync-preview`, {method:'POST', headers:{'Content-Type':'application/json','X-Studio-Local':'1'}, body:JSON.stringify({audio_index:Number(track.value)})});
     syncProposal = {pid, cues:result.cues, useNew:false, trackLabel:track.selectedOptions?.[0]?.textContent || `Pista ${track.value}`};
     renderSyncPanel(pid);
-  } catch (error) { panel.textContent = `No se pudo sincronizar: ${error.message}`; }
+  } catch (error) { panel.hidden = true; if ($('workspace-subtitles')) $('workspace-subtitles').hidden = false; alert(`No se pudo sincronizar: ${error.message}`); }
   finally { busy = syncRunning = false; }
 }
 
@@ -1074,7 +1112,7 @@ async function applySync(pid, cues, undo) {
 function editorToolbar(cues, project, readOnly = false) {
   const toolbar = readOnly
     ? project.state === 'transcribing' && !viewingTrash ? `<div class="editor-toolbar"><span class="tiny">Puedes traducir cada segmento mientras continúa la transcripción.</span></div>` : `<div class="notice">${viewingTrash ? "Restaura el proyecto para editarlo." : project.state === 'paused' ? "La tarea está pausada; puedes reanudarla o cancelarla." : "Segmentos visibles en modo lectura mientras se procesa; la edición se reactivará al terminar."}</div>`
-    : `<div class="editor-toolbar"><details id="project-operations" class="project-operations"><summary>⋯ Herramientas de subtítulos <span aria-hidden="true">▾</span></summary><div class="operations-menu">${project.source_kind === 'reference' && project.audio_tracks?.length ? '<button id="sync-start">Sincronizar con audio</button>' : ''}${syncUndo?.pid === project.id ? '<button id="sync-undo">Deshacer sincronización</button>' : ''}<details id="improve-picker" class="improve-picker"><summary>Mejorar transcripción</summary><div class="improve-options"><label>Modelo de Ollama <select id="improve-model"><option value="">Elige un modelo</option></select></label><span id="improve-model-status" class="tiny" role="status"></span><button id="improve-text" type="button">Iniciar mejora</button></div></details>${cues.some((c) => c.proposal) ? `<button id="accept-proposals">Aceptar ${cues.filter(c => c.proposal).length} propuestas</button>` : ""}${currentStage !== 'translate' && cues.some((c) => (c.original || "").trim() && !(c.translated || "").trim()) ? '<button id="translate-pending">Configurar traducción</button>' : ""}${project.can_undo_improvement ? '<button id="undo-improvement">Revertir última mejora</button>' : ""}${typeof lastComparisonUndo !== 'undefined' && lastComparisonUndo?.pid === project.id ? '<button id="undo-comparison">Deshacer última operación</button>' : ''}${project.source_kind === "reference" ? '<button id="retranscribe">Volver a transcribir</button>' : ''}</div></details></div>`;
+    : `<div class="editor-toolbar"><details id="project-operations" class="project-operations"><summary>⋯ Herramientas de subtítulos <span aria-hidden="true">▾</span></summary><div class="operations-menu"><button id="global-sync-open" type="button">Ajustar tiempos globalmente</button>${project.source_kind === 'reference' && project.audio_tracks?.length ? '<button id="sync-start">Sincronizar con audio</button>' : ''}${syncUndo?.pid === project.id ? '<button id="sync-undo">Deshacer sincronización</button>' : ''}<details id="improve-picker" class="improve-picker"><summary>Mejorar transcripción</summary><div class="improve-options"><label>Modelo de Ollama <select id="improve-model"><option value="">Elige un modelo</option></select></label><span id="improve-model-status" class="tiny" role="status"></span><button id="improve-text" type="button">Iniciar mejora</button></div></details>${cues.some((c) => c.proposal) ? `<button id="accept-proposals">Aceptar ${cues.filter(c => c.proposal).length} propuestas</button>` : ""}${currentStage !== 'translate' && cues.some((c) => (c.original || "").trim() && !(c.translated || "").trim()) ? '<button id="translate-pending">Configurar traducción</button>' : ""}${project.can_undo_improvement ? '<button id="undo-improvement">Revertir última mejora</button>' : ""}${typeof lastComparisonUndo !== 'undefined' && lastComparisonUndo?.pid === project.id ? '<button id="undo-comparison">Deshacer última operación</button>' : ''}${project.source_kind === "reference" ? '<button id="retranscribe">Volver a transcribir</button>' : ''}</div></details></div>`;
   return toolbar;
 }
 function editorTable(cues, project, readOnly = false) {
