@@ -1,5 +1,19 @@
 # Subtitle Studio — MVP local para Apple Silicon
 
+[![npm](https://img.shields.io/npm/v/subtitle-studio?logo=npm&label=npm)](https://www.npmjs.com/package/subtitle-studio)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+![Status: MVP](https://img.shields.io/badge/status-MVP-orange)
+![100% local](https://img.shields.io/badge/processing-100%25%20local-2ea44f)
+![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?logo=apple&logoColor=white)
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
+![Node 18.17+](https://img.shields.io/badge/node-%E2%89%A518.17-339933?logo=nodedotjs&logoColor=white)
+![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)
+![Docker](https://img.shields.io/badge/docker-supported-2496ED?logo=docker&logoColor=white)
+![MLX](https://img.shields.io/badge/MLX-Metal-lightgrey)
+![Qwen3-ASR](https://img.shields.io/badge/ASR-Qwen3--ASR-6F42C1)
+![Ollama](https://img.shields.io/badge/LLM-Ollama-black)
+![SRT · VTT](https://img.shields.io/badge/export-SRT%20%C2%B7%20VTT-informational)
+
 Transcripción, traducción a un idioma de destino, edición por segmento y exportación SRT/VTT. Frontend Nginx, API FastAPI, worker RQ, PostgreSQL y Redis ejecutan en Docker. Qwen3-ASR y su alineador ejecutan con **MLX/Metal nativo en macOS**; Ollama también es nativo.
 
 ## Preparación y arranque
